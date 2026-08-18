@@ -357,10 +357,11 @@ class Orchestrator(ToolCallingAgent):
             Return:
                 All relevant information about the request: inventory_name, quantity, request date, requested delivery date
             """
-            self.order_processor_resp = self.order_processor.run(
-                f"Customer request: {request_w_date}\n"
-                f"- Extract every item requested and call assign_item to assign an item object to it. the result of the extraction must a list of this schema {json.dumps(item_schema)}\n"
-                f"- Call final_answer: List of the items in this schema: {json.dumps(item_schema)}"
+            self.order_processor_resp = self.order_processor.run(f"""
+            Customer request: {request_w_date}\n"
+            Extract every item requested and call assign_item to assign an item object to it. the result of the extraction must be a list of this schema {json.dumps(item_schema)}\n"
+            Call final_answer: List of the items in this schema: {json.dumps(item_schema)}
+            """
             )
             return self.order_processor_resp
 
@@ -375,30 +376,30 @@ class Orchestrator(ToolCallingAgent):
                 return "Order was not processed yet, call get_order_details first"
 
             self.inventory_manager_resp = self.inventory_manager.run(f"""
-                                              Valid catalog item names are exactly:
-                                              {", ".join(ctx.available_items)}\n
-                                              For each item in {self.order_processor_resp}
-                                                    1 - Map the customer's wording to the closest valid catalog name above, call assign_inventory_name with the result
-                                                    2 - Call check_inventory
-                                                    3-  Call check_delivery_timeline
-                                              When every item has been checked, and all tool calls finish, then call final_answer tool:
-                                                 final_answer: List of the items in this schema: {json.dumps(item_schema)}
-                                        """)
+            Valid catalog item names are exactly: {", ".join(ctx.available_items)}
+            For each item in {self.order_processor_resp}
+             1 - Map the customer's wording to the closest valid catalog name above, call assign_inventory_name with the result
+             2 - Call check_inventory
+             3-  Call check_delivery_timeline
+            When every item has been checked, and all tool calls finish, then call final_answer tool:
+             final_answer: List of the items in this schema: {json.dumps(item_schema)}
+            """
+            )
             return self.inventory_manager_resp
 
         @tool
         def prepare_quote() -> str:
             """Prepare quote for the order requested by the customer
             Returns:
-                which a discount is applicable to the items or not to increase the satisfaction of the client"
+                Determines whether a discount applies to the items to increase client satisfaction.
             """
             if self.inventory_manager_resp is None:
                 return "Items are not checked yet by the inventory! Call manage_inventory first"
 
-            self.quote_manager_resp = self.quote_manager.run(f"""1 - For each item in the List:{self.inventory_manager_resp}: Call calculate_discount
-                                                                 2 - Call final_answer: List of the items with this schema: {json.dumps(item_schema)}
-                                                            """
-            )
+            self.quote_manager_resp = self.quote_manager.run(f"""
+            1 - Call calculate_discount for each item in the List:{self.inventory_manager_resp}
+            2 - Call final_answer: List of the items with this schema: {json.dumps(item_schema)}
+            """)
             return self.quote_manager_resp
 
         @tool
@@ -414,18 +415,18 @@ class Orchestrator(ToolCallingAgent):
             self.ctx.items_sold.clear()
 
             return self.sales_manager.run(f"""
-                                         1 - For each item in the list: {self.quote_manager_resp}:
-                                            call execute_sale
-                                         2 - When every item has been checked and all tool calls finish, then call final_answer tool alone with:
-                                            List of the items in this schema: {json.dumps(item_schema)}
-                                            Then a final line:
-                                            VERDICT: ORDER FULFILLED
-                                            or
-                                            VERDICT: ORDER is fulfilled partially, <list the items that were sold successfully>
-                                            or 
-                                            VERDICT: ORDER cannot be fulfilled
-                                            Do not add any other text.
-                                    """)
+            1 - Call execute_sale for each item in the list: {self.quote_manager_resp}:
+            2 - When every item has been checked and all tool calls finish, then call final_answer tool alone with:
+             List of the items in this schema: {json.dumps(item_schema)}
+             Then a final line:
+              VERDICT: ORDER FULFILLED
+              OR
+              VERDICT: ORDER is fulfilled partially, <list the items that were sold successfully>
+              OR
+              VERDICT: ORDER cannot be fulfilled
+            Do not add any other text.
+            """
+                                          )
 
         # 2 - Update the inventory if the sale transaction is a success
 
@@ -455,20 +456,16 @@ class Orchestrator(ToolCallingAgent):
         # Use the orchestrator's own coordination workflow
         context = f"""
         Customer request: "{customer_message}"
-        IMPORTANT: 
-            - DO NOT CREATE FAKE TRANSACTIONS/DATES/ORDERS, IF SOMETHING WENT WRONG OR MISSING, HIGHLIGHT IT
-            
+        IMPORTANT: DO NOT CREATE FAKE TRANSACTIONS/DATES/ORDERS, IF SOMETHING WENT WRONG OR MISSING, HIGHLIGHT IT
         Process this order by coordinating with our specialized agents:
-        
         For customer orders, follow this workflow:
-            1. Call get_order_details with the customer request to extract the items.
-            2. Call manage_inventory with the extracted item list
-            3. call prepare_quote with the result of manage_inventory
-            4. Call prepare_sale with the result of prepare_quote
-            5. Call final_answer based on the verdict of sale managers agent:
-                - if all items have suborder_executed : True, then inform the customer that the request will be fulfilled and give information about the delivery date of each item from prepare_sale
-                - if some items have suborder_executed: False, then inform the customer that the request will be partially fulfilled and provide them information about the items that cannot be shipped and the ones that will be with the delivery date of each item from prepare_sale.
-                - if all items have suborder_executed: False, then inform the customer that none of the items are available and the request cannot be fulfilled
+         1. Call get_order_details with the customer request to extract the items.
+         2. Call manage_inventory with the extracted item list
+         3. call prepare_quote with the result of manage_inventory
+         4. Call prepare_sale with the result of prepare_quote
+         5. Call final_answer based on the verdict of sale managers agent:
+          - if all items have suborder_executed : True, then inform the customer that the request will be fulfilled and give information about the delivery date of each item from prepare_sale
+          - if some items have suborder_executed: False, then inform the customer that the request will be partially fulfilled and provide them information about the items that cannot be shipped and the ones that will be with the delivery date of each item from prepare_sale.
+          - if all items have suborder_executed: False, then inform the customer that none of the items are available and the request cannot be fulfilled
         """
-
         return self.run(task=context)
