@@ -1,8 +1,41 @@
 request_id,request_date,cash_balance,inventory_value,response
-1,2025-04-01,45059.7,4940.299999999999,"Your request for the following paper supplies has been fulfilled:
-
-- 200 sheets of A4 glossy paper will be delivered by April 15, 2025.
-- 100 sheets of heavy cardstock (white) will be delivered by April 15, 2025.
-- 100 sheets of colored paper (assorted colors) will be delivered by April 15, 2025.
+1,2025-04-01,45149.7,4840.3,"Your request for the following paper supplies will be fulfilled:
+- 200 sheets of A4 glossy paper (Delivery Date: April 15, 2025)
+- 100 sheets of heavy cardstock (white) (Delivery Date: April 15, 2025)
+- 100 sheets of colored paper (assorted colors) (Delivery Date: April 15, 2025)
 
 Thank you for your order!"
+2,2025-04-03,45195.7,4840.3,"Your order will be partially fulfilled. The following items will be delivered by April 15, 2025:
+- 500 sheets of colorful poster paper
+- 300 rolls of streamers
+
+Unfortunately, the 200 balloons cannot be shipped as they are not available."
+3,2025-04-04,45195.7,4840.3,"Unfortunately, your order cannot be fulfilled as none of the requested items are available. Please consider adjusting your order or checking back later."
+4,2025-04-05,45212.95,4827.8,"The request will be fulfilled. The delivery date for the items is April 15, 2025. You will receive 250 sheets of A4 size printer paper. However, the 500 sheets of high-quality, recycled cardstock in various colors cannot be shipped as they are short by 500 sheets."
+5,2025-04-05,45308.45,4732.8,"Your order will be partially fulfilled. The following items will be delivered by April 15, 2025:
+- 500 sheets of 8.5""x11"" colored paper
+- 300 sheets of cardstock in various colors
+
+Unfortunately, the 200 rolls of decorative washi tape cannot be shipped as they are not available. We will notify you once they are back in stock."
+6,2025-04-06,45330.5,4732.8,"The request will be fulfilled. The items will be delivered by April 15, 2025."
+7,2025-04-07,45682.55,4355.4,"The request will be fulfilled. The delivery date for the items is April 15, 2025."
+8,2025-04-07,45740.65,4336.599999999999,"The request will be partially fulfilled. The following items cannot be shipped: 500 sheets of A4 glossy paper and 1000 sheets of A4 matte paper. The items that will be delivered are: 2000 sheets of A5 colored paper with a delivery date of April 15, 2025."
+9,2025-04-07,45740.65,4336.599999999999,None of the items are available and the request cannot be fulfilled.
+10,2025-04-08,45764.65,4306.599999999999,"Your order will be partially fulfilled. The following item will be delivered by April 10, 2025: 200 sheets of cardstock. Unfortunately, we cannot fulfill the order for 500 sheets of A4 printing paper as it is not available."
+11,2025-04-08,45771.15,4306.599999999999,"Your order has been fulfilled. The supplies will be delivered by April 15, 2025."
+12,2025-04-08,45803.590000000004,4292.349999999999,"The request will be fulfilled. The delivery date for both items is April 15, 2025."
+13,2025-04-08,45826.69,4292.349999999999,"The request will be fulfilled. The delivery date for both items is April 15, 2025."
+14,2025-04-09,45826.69,4292.349999999999,"Unfortunately, your order cannot be fulfilled as none of the requested items are available. We are unable to provide the 5,000 sheets of A4 paper, 2,000 sheets of poster paper in various colors, and 500 sheets of cardstock."
+15,2025-04-12,45826.69,4292.349999999999,"Unfortunately, none of the items in your order can be fulfilled at this time. We are unable to provide the requested quantities of A4 white paper, A3 colored paper, and cardboard for signage."
+16,2025-04-13,45826.69,4292.349999999999,"Unfortunately, your order cannot be fulfilled as none of the requested items are available."
+17,2025-04-14,45871.69,4242.349999999999,"Your order will be partially fulfilled. The following item will be delivered by April 15, 2025:
+- 500 paper plates (biodegradable)
+
+Unfortunately, the following items cannot be shipped:
+- 1000 sheets of A4 white printer paper
+- 500 sheets of A3 colored paper (assorted colors)
+- 2000 table napkins (white)
+- 1000 paper cups (biodegradable)"
+18,2025-04-14,45871.69,4242.349999999999,"Unfortunately, none of the items in your order can be fulfilled at this time. Your request for 500 sheets of high-quality white cardstock, 1000 sheets of standard printing paper, and 200 sheets of colored paper in assorted colors cannot be processed."
+19,2025-04-15,45871.69,4242.349999999999,"Unfortunately, your order cannot be fulfilled as none of the requested items are available."
+20,2025-04-17,45871.69,4242.349999999999,"Unfortunately, your order cannot be fulfilled as none of the requested items (5,000 flyers, 2,000 posters, and 10,000 tickets) are available."
