@@ -20,7 +20,8 @@ class RequestedItem(BaseModel):
             description="Flag to indicate the quantity of the item can be sold from the inventory"
         ),
     ]
-    short_by: Annotated[int, Field(description="Short by quantity from the inventory")]
+    short_by: Annotated[int, Field(
+        description="Short by quantity from the inventory")]
     order_supplier: Annotated[
         bool,
         Field(
@@ -33,14 +34,23 @@ class RequestedItem(BaseModel):
             description="Estimated date to get the item from the supplier in format: <YYYY-MM-DD>"
         ),
     ]
-    order_date: Annotated[str, Field(description="Order date in format: <YYYY-MM-DD>")]
+    order_date: Annotated[str, Field(
+        description="Order date in format: <YYYY-MM-DD>")]
     delivery_date: Annotated[
         str, Field(description="Delivery date in format: <YYYY-MM-DD>")
     ]
-    discount: Annotated[float, Field(ge=0, le=1, description="Discount on the item")]
+    discount: Annotated[float, Field(
+        ge=0, le=1, description="Discount on the item")]
     suborder_executed: Annotated[
         bool,
         Field(
             description="Flag whether selling the item with the requested item was success or not"
         ),
     ]
+
+
+class FinancialReport(BaseModel):
+    as_of_date: Annotated[str, Field(description='The date of the report')]
+    cash_balance: Annotated[float, Field(description='Total cash available')]
+    inventory_value: Annotated[float, Field(
+        description='Total value of inventory')]
