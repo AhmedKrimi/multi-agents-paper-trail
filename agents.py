@@ -1,18 +1,20 @@
 from smolagents import OpenAIServerModel, ToolCallingAgent, tool
-from items_model import RequestedItem
+from items_model import RequestedItem, FinancialReport
 from pydantic import ValidationError
 from config import item_schema
 import uuid
 import json
 from context import Context
 from utils import (
-    validate_item,
+    validate_model,
     create_transaction,
     get_stock_level,
     get_supplier_delivery_date,
     _parse_date,
     search_quote_history,
     reorder_supply,
+    get_all_inventory,
+    generate_financial_report
 )
 
 
@@ -87,7 +89,7 @@ class InventoryManagerAgent(ToolCallingAgent):
                 item (str): Updated requested item with valid name from the inventory
             """
             try:
-                item = validate_item(item_dict)
+                item = validate_model(RequestedItem, item_dict)
             except ValidationError as e:
                 return f"ERROR: Validation error: {e}"
             if valid_name not in ctx.available_items:
@@ -107,7 +109,7 @@ class InventoryManagerAgent(ToolCallingAgent):
             """
 
             try:
-                item = validate_item(item_dict)
+                item = validate_model(RequestedItem, item_dict)
             except ValidationError as e:
                 return f"ERROR: Validation error: {e}"
             inventory_name = item.inventory_name
@@ -138,7 +140,7 @@ class InventoryManagerAgent(ToolCallingAgent):
                 item (str): Updated requested item with information about estimated date of supplier delivery
             """
             try:
-                item = validate_item(item_dict)
+                item = validate_model(RequestedItem, item_dict)
             except ValidationError as e:
                 return f"ERROR: Validation error: {e}"
             order_date = item.order_date
@@ -183,7 +185,7 @@ class QuoteManagerAgent(ToolCallingAgent):
                 item (str): Updated requested item with the discount to be applied at checkout
             """
             try:
-                item = validate_item(item_dict)
+                item = validate_model(RequestedItem, item_dict)
             except ValidationError as e:
                 return f"ERROR: Validation error: {e}"
             discount = None
@@ -244,7 +246,7 @@ class SalesManagerAgent(ToolCallingAgent):
                 item (str): Updated requested item with information about the sale execution
             """
             try:
-                item = validate_item(item_dict)
+                item = validate_model(RequestedItem, item_dict)
             except ValidationError as e:
                 return f"ERROR: Validation error: {e}"
             item_id = item.suborder_id
@@ -333,6 +335,79 @@ class SalesManagerAgent(ToolCallingAgent):
         return [execute_sale]
 
 
+class AfterSalesAgent(ToolCallingAgent):
+    def __init__(self, model: OpenAIServerModel, ctx: Context):
+        self.ctx = ctx
+
+        super().__init__(
+            model=model,
+            tools=self._build_agents(),
+            name="after_sales",
+            description="Agent Responsible for performing after sales op "
+            "(restocking, creating financal report)"
+        )
+
+    def _build_agents(self):
+        ctx = self.ctx
+
+        @tool
+        def execute_restock(order_date: str) -> str:
+            """Restock the items out of stock after processing a customer request
+            Args:
+                order_date (str): order date of the request in <YYYY-MM-DD> format
+            Return:
+                List of restocked items
+            """
+            _items_restocked = []
+            inv = get_all_inventory(
+                db_engine=ctx.db_engine, as_of_date=order_date)
+            for item, stock in inv.items():
+                min_stock_level = None
+                if item not in ctx.min_stock_levels:
+                    print(f"ERROR: Item {item} is not in stock")
+                    continue
+                min_stock_level = ctx.min_stock_levels[item]
+                if stock < min_stock_level:
+                    to_order_qnt = min_stock_level - stock
+                    print(
+                        f"ITEM: {item}, is short in stock (only: {stock} left), restocking with qnt: {to_order_qnt}")
+                    res = reorder_supply(
+                        inventory_name=item,
+                        quantity=to_order_qnt,
+                        order_date=order_date,
+                        ctx=ctx
+                    )
+                    if res:
+                        _items_restocked.append(item)
+            if len(_items_restocked) > 0:
+                return f"Following items got restocked: {", ".join(_items_restocked)}"
+            return "All items are available - no restocking performed"
+
+        @tool
+        def get_financial_status(order_date: str) -> str:
+            """Get Final Cash and Final Inventory after the order and the restocking is performed
+            Args:
+                order_date (str): order_date (str): order date of the request in <YYYY-MM-DD> format
+            Returns:
+                str: state of the cash and the inventory
+            """
+
+            financial_report_full = generate_financial_report(
+                ctx.db_engine, order_date)
+            keys = ["as_of_date", "cash_balance",
+                    "inventory_value"]
+            financial_report_short = {
+                k: financial_report_full[k] for k in keys}
+            try:
+                financial_report_model = validate_model(
+                    FinancialReport, financial_report_short)
+                return financial_report_model.model_dump_json()
+            except ValidationError as e:
+                return f"ERROR: Validation error: {e}"
+
+        return [execute_restock, get_financial_status]
+
+
 class Orchestrator(ToolCallingAgent):
     """Orchestrator that coordinates the activities of all agents"""
 
@@ -344,15 +419,17 @@ class Orchestrator(ToolCallingAgent):
         self.order_processor = OrderProcessorAgent(model)
         self.quote_manager = QuoteManagerAgent(model, ctx)
         self.sales_manager = SalesManagerAgent(model, ctx)
+        self.after_sales = AfterSalesAgent(model, ctx)
         self.order_processor_resp = None
         self.inventory_manager_resp = None
         self.quote_manager_resp = None
+        self.inventory_cash_status = None
 
         @tool
         def get_order_details(request_w_date: str) -> str:
             """Extract relevant information from customer message
             Args:
-                request_w_date: request made by the customer with the date
+                request_w_date (str): request made by the customer with the date
 
             Return:
                 All relevant information about the request: inventory_name, quantity, request date, requested delivery date
@@ -428,18 +505,40 @@ class Orchestrator(ToolCallingAgent):
             """
                                           )
 
+        @tool
+        def after_sales_routine(request_date: str) -> dict[str, float | str]:
+            """
+                Perfrom after sales routine (restocking, generate financial report)
+            Args:
+                request_date (str): request date made by the customer in <YYYY-MM-DD>
+            Returns:
+                cash and inventory status
+            """
+            self.inventory_cash_status = self.after_sales.run(f"""
+            1- Call execute_restock with order_date from {request_date}.
+            2- Call get_financial_status with {request_date}.
+            3- Call final_anwser with the result from get_financial_status in this schema {FinancialReport.model_json_schema()}
+            """)
+            return self.inventory_cash_status
+
         # 2 - Update the inventory if the sale transaction is a success
 
         super().__init__(
             model=model,
             tools=[get_order_details, manage_inventory,
-                   prepare_quote, prepare_sale],
+                   prepare_quote, prepare_sale, after_sales_routine],
             name="orchestrator",
             description="""
                         You are the orchestrator for a paper company
-                        You coordinate between the order processor, inventory manager, quote manager and sales manager agents.
+                        You coordinate between the order processor,
+                        inventory manager, quote manager, sales manager
+                        and after sales agents.
                         """,
         )
+
+    def get_inventory_cash_status(self) -> dict[str, float | str] | None:
+        """Get the inventory and cash status from the orchestrator"""
+        return self.inventory_cash_status
 
     def process_customer_order(self, customer_message: str) -> str:
         """Process a customer order through the coordinated agent workflow.
@@ -463,7 +562,8 @@ class Orchestrator(ToolCallingAgent):
          2. Call manage_inventory with the extracted item list
          3. call prepare_quote with the result of manage_inventory
          4. Call prepare_sale with the result of prepare_quote
-         5. Call final_answer based on the verdict of sale managers agent:
+         5. Call after_sales_routine
+         6. Only after after_sales_routine call is finished, call final_answer based on the verdict of sale managers agent:
           - if all items have suborder_executed : True, then inform the customer that the request will be fulfilled and give information about the delivery date of each item from prepare_sale
           - if some items have suborder_executed: False, then inform the customer that the request will be partially fulfilled and provide them information about the items that cannot be shipped and the ones that will be with the delivery date of each item from prepare_sale.
           - if all items have suborder_executed: False, then inform the customer that none of the items are available and the request cannot be fulfilled

@@ -6,16 +6,24 @@ from config import db_engine, available_items, products_price, working_dir
 from context import Context
 from agents import Orchestrator
 from smolagents import OpenAIServerModel
-from utils import generate_financial_report, init_database
+from utils import (generate_financial_report,
+                   init_database,
+                   get_min_stock_levels)
 
 # Run the test scenarios
 
 
 def run_test_scenarios():
-    context = Context(db_engine, available_items,
-                      products_price, items_sold=set())
-    print("Initializing Database...")
+    # Initialize shared context
+    context = Context(db_engine=db_engine,
+                      available_items=available_items,
+                      products_price=products_price,
+                      min_stock_levels={},
+                      items_sold=set())
+    # Initializing Database
     init_database(db_engine=context.db_engine)
+    context.min_stock_levels = get_min_stock_levels(
+        db_engine=context.db_engine)
     try:
         quote_requests_sample = pd.read_csv(
             os.path.join(working_dir, "quote_requests_sample.csv")
@@ -70,9 +78,10 @@ def run_test_scenarios():
         response = orchestrator.process_customer_order(request_with_date)
 
         # Update state with the orchestrator's response
-        report = generate_financial_report(db_engine, request_date)
-        current_cash = report["cash_balance"]
-        current_inventory = report["inventory_value"]
+        report = orchestrator.get_inventory_cash_status()
+        if report:
+            current_cash = report["cash_balance"]
+            current_inventory = report["inventory_value"]
 
         print(f"RESPONSE: {response}")
         print(f"Updated Cash: ${current_cash:.2f}")
