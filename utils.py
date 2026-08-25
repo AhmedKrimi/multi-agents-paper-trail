@@ -2,7 +2,7 @@ import ast
 import os
 from datetime import datetime, timedelta
 from config import working_dir
-from items_model import RequestedItem
+from items_model import RequestedItem, FinancialReport
 
 import numpy as np
 import pandas as pd
@@ -616,6 +616,20 @@ def create_transaction(
         raise
 
 
-def validate_item(item_dict: dict) -> RequestedItem:
-    """Build a RequestedItem, raises ValidationError on bad input"""
-    return RequestedItem(**item_dict)
+def validate_model(model: type[RequestedItem | FinancialReport], model_dict: dict) -> RequestedItem | FinancialReport:
+    """Build a model, raises ValidationError on bad input"""
+    return model(**model_dict)
+
+
+def get_min_stock_levels(db_engine: Engine) -> dict[str, int]:
+    """
+    Retrieve the minimum stock level (reorder threshold) for each inventory item
+    Args:
+        db_engine (Engine): Database engine
+    Returns:
+        Dict[str, int]: Mapping of inventory_name to min_stock_level
+    """
+    result = pd.read_sql(
+        "SELECT inventory_name, min_stock_level FROM inventory", db_engine
+    )
+    return dict(zip(result["inventory_name"], result["min_stock_level"]))
