@@ -20,64 +20,91 @@ Doing this by hand doesn't scale; automating it naively with a single LLM prompt
 
 ## The Solution
 
-This project solves the problem with a pipeline of five specialized agents plus the orchestrator, each owning one stage of the order lifecycle and communicating through a strictly validated data contract:
+This project solves the problem with four specialized agents plus the orchestrator, each owning one stage of the order lifecycle and sharing typed workflow state through a common `Context`:
 
-- A single Pydantic model (`RequestedItem`) flows through the pipeline: each agent enriches it, so every decision is machine-checkable and traceable per item.
-- All financial and inventory logic lives in deterministic Python tools: the LLM decides *when* to act, never *what the numbers are*. Stock math, discount rules, supplier reorders, and ledger writes are pure code.
-- Defensive guards at every stage: enforced execution order, duplicate-sale protection, shortfall re-verification at sale time, and cash-balance checks before any supplier purchase — keep a single agent mistake from cascading into the books.
+- A shared Pydantic model (`RequestedItem`) is stored in `Context` and enriched in place by each stage, avoiding prompt-chained JSON/schema passing between agents.
+- Catalog matching is deterministic: customer item descriptions are embedded with BGE-M3 and compared against cached catalog embeddings.
+- All financial and inventory logic lives in deterministic Python tools: stock math, discount rules, supplier reorders, restocking, and ledger writes are handled in code.
+- Defensive guards at every stage: execution-order checks, duplicate-sale protection, shortfall re-verification at sale time, and cash-balance checks before supplier purchases limit inconsistent state.
 
 The result: a customer request goes in as plain text and comes out as a priced, verified, executed (or transparently declined) order, with the database as the single source of truth at every point in time.
 
-> Built as the capstone for Udacity's Agentic AI program (multi-agent systems module).
-
 ---
+
+## Project origin
+
+This project builds on Udacity’s Agentic AI capstone starter:
+
+[Udacity starter project](https://github.com/udacity/agentic-ai-c4-exercises-demos/tree/main/project)
+
+The starter provides the base dataset, catalog, database setup, and utility scaffolding. The multi-agent workflow in this repository was implemented and then substantially refactored to use shared typed state, deterministic embedding-based catalog matching, consolidated sales/post-sale handling, and structured final-state retrieval.
 
 ## Architecture
 
-The system uses exactly 5 specialized agents, all implemented as `ToolCallingAgent` instances and coordinated by a top-level orchestrator:
+The system uses 4 specialized agents, all implemented as `ToolCallingAgent` instances and coordinated by a top-level orchestrator:
 
-```
-                        ┌────────────────┐
- Customer request ────▶ │  Orchestrator  │
-                        └────────┬───────┘
-                                 │
-       ┌────────────┬────────────┼────────────┬────────────┐
-       ▼            ▼            ▼            ▼            ▼
- ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐ ┌──────────┐
- │  Order   │ │Inventory │ │  Quote   │ │  Sales   │ │  After   │
- │Processor │ │ Manager  │ │ Manager  │ │ Manager  │ │  Sales   │
- └──────────┘ └──────────┘ └──────────┘ └──────────┘ └──────────┘
+```mermaid
+flowchart TD
+    C[Customer Request] --> O[Orchestrator]
 
- Order Processor : assign_item
- Inventory Mgr   : assign_inventory_name · check_inventory · check_delivery_timeline
- Quote Manager   : calculate_discount
- Sales Manager   : execute_sale (+ reorder_supply)
- After Sales     : execute_restock · get_financial_status
+    O --> OP[Order Processor]
+    OP --> IM[Inventory Manager]
+    IM --> QM[Quote Manager]
+    QM --> SM[Sales Manager]
+
+    OP --> OP1[extract_item_description]
+
+    IM --> IM1[assign_inventory_name]
+    IM --> IM2[check_stock_inventory]
+    IM --> IM3[check_delivery_timeline]
+
+    QM --> QM1[calculate_discount_rate]
+
+    SM --> SM1[execute_sale]
+    SM --> SM2[execute_restock]
+    SM --> SM3[get_financial_status]
+
+    O --> O1[get_order_details]
+    O --> O2[manage_inventory]
+    O --> O3[prepare_quote]
+    O --> O4[prepare_sale_restock_financial_report]
+    O --> O5[get_order_state]
+
+    O --> CTX[(Shared Context)]
+    OP --> CTX
+    IM --> CTX
+    QM --> CTX
+    SM --> CTX
+
+    IM --> DB[(SQLite Database)]
+    QM --> DB
+    SM --> DB
+
+    SM --> S[Structured Order State]
+    S --> O
+    O --> R[Customer Response]
 ```
 
 | Agent | Responsibility | Tools |
 |---|---|---|
-| **Orchestrator** | Coordinates the whole workflow and composes the final customer-facing answer | `get_order_details`, `manage_inventory`, `prepare_quote`, `prepare_sale`, `after_sales_routine` |
-| **Order Processor** | Extracts every requested item from the free-text customer message and wraps it in a structured `RequestedItem` object with a unique suborder ID | `assign_item` |
-| **Inventory Manager** | Maps customer wording to a valid catalog name, checks stock levels as of the order date, and verifies whether missing quantities can arrive from the supplier before the requested delivery date | `assign_inventory_name`, `check_inventory`, `check_delivery_timeline` |
-| **Quote Manager** | Applies a discount based on historical quote data (order size from `search_quote_history`) or, when no history exists, on requested quantity | `calculate_discount` |
-| **Sales Manager** | Reorders shortfalls from the supplier (if cash and timing allow), re-verifies stock, and records the sale transaction | `execute_sale` |
-| **After Sales** | Runs after the sale is booked: restocks any catalog item that has dropped below its minimum stock level, then produces a point-in-time financial report of cash balance and inventory value | `execute_restock`, `get_financial_status` |
+| **Orchestrator** | Coordinates the workflow and composes the final customer-facing answer from structured order state | `get_order_details`, `manage_inventory`, `prepare_quote`, `prepare_sale_restock_financial_report`, `get_order_state` |
+| **Order Processor** | Extracts requested items from free text and appends typed `RequestedItem` objects to shared workflow state | `extract_item_description` |
+| **Inventory Manager** | Matches customer wording to the catalog using embeddings, checks stock, and verifies supplier timing for shortages | `assign_inventory_name`, `check_stock_inventory`, `check_delivery_timeline` |
+| **Quote Manager** | Applies a discount based on historical quote data or requested quantity | `calculate_discount_rate` |
+| **Sales Manager** | Reorders shortfalls when feasible, executes sales, restocks low inventory, and generates the financial report | `execute_sale`, `execute_restock`, `get_financial_status` |
 
 ### Data flow
 
-Every item travels through the pipeline as a Pydantic `RequestedItem` model (see `items_model.py`), which acts as the shared contract between agents. Each stage enriches the object:
+Requested items are stored once in `Context.requested_items` as typed Pydantic `RequestedItem` objects and mutated in place throughout the workflow:
 
-1. `suborder_id`, `item_info`, `requested_quantity`, `order_date`, `delivery_date` (Order Processor)
-2. `inventory_name`, `can_fulfil`, `short_by`, `order_supplier`, `estimated_date` (Inventory Manager)
-3. `discount` (Quote Manager)
-4. `suborder_executed` (Sales Manager)
+1. `order_line_id`, `item_description`, `requested_quantity`, `order_date`, `delivery_date` (Order Processor)
+2. `matched_catalog_item`, `can_fulfill`, `shortage_quantity`, `supplier_order_feasible`, `supplier_delivery_date` (Inventory Manager)
+3. `discount_rate` (Quote Manager)
+4. `sale_completed` (Sales Manager)
 
-Once every item has been sold or declined, the After Sales stage runs. It does not enrich individual `RequestedItem` objects; it works on the whole ledger and inventory, restocking depleted items and returning a separate `FinancialReport` model (`as_of_date`, `cash_balance`, `inventory_value`).
+The Sales Manager also owns post-sale restocking and financial reporting. The orchestrator then calls `get_order_state` to retrieve the authoritative structured state before composing the customer response.
 
-The orchestrator enforces ordering: each downstream tool refuses to run if the previous stage's result is missing (e.g. `prepare_quote` returns an error message if `manage_inventory` hasn't been called yet).
-
----
+This replaces the earlier design that serialized `RequestedItem` objects and repeatedly passed model JSON/schema text through agent prompts.
 
 ## Business logic
 
@@ -87,24 +114,24 @@ The orchestrator enforces ordering: each downstream tool refuses to run if the p
 - `reorder_supply` purchases the shortfall at 75% of the retail unit price (`SUPPLIER_PRICE_FACTOR = 0.75`), but only if the current cash balance covers the cost. Purchases are logged as `stock_orders` transactions.
 
 ### Quoting & discounts
-`calculate_discount` first searches historical quotes (`search_quote_history`) for a matching request:
+`calculate_discount_rate` first searches historical quotes (`search_quote_history`) for a matching request:
 
 - History found → discount by past `order_size`: large = 20%, medium = 10%, otherwise 0%.
 - No history → discount by requested quantity: ≥1000 units = 20%, ≥100 units = 10%, else 0%.
 
 ### Sales execution
 `execute_sale` guards against several failure modes:
-- Duplicate execution: a module-level `_items_sold` set prevents double-selling the same suborder ID within one order.
+- Duplicate execution: `Context.sold_order_line_ids` prevents double-selling the same order line within one order.
 - Stale shortfall data: the actual shortfall is recomputed at sale time and compared against the Inventory Manager's figure; on mismatch the sale is aborted.
 - Final stock check: stock is re-verified after any supplier reorder before the sale transaction is written.
-- Successful sales are recorded at `(1 − discount) × unit_price × quantity` as `sales` transactions.
+- Successful sales are recorded at `(1 − discount_rate) × unit_price × quantity` as `sales` transactions.
 
 The orchestrator's final answer reports one of three verdicts: fulfilled, partially fulfilled (listing which items shipped and which didn't, with delivery dates), or cannot be fulfilled. Its prompt explicitly forbids fabricating transactions, dates, or orders.
 
-### After-sales restocking & reporting
-After a sale is booked, the orchestrator calls `after_sales_routine`, which runs the After Sales agent in two steps:
-- `execute_restock` scans the full inventory as of the request date via `get_all_inventory` and reorders any item whose stock has fallen below its configured minimum (`min_stock_levels`) back up to that level, using the same `reorder_supply` path (75% supplier pricing, cash permitting).
-- `get_financial_status` calls `generate_financial_report` and returns a validated `FinancialReport` containing `as_of_date`, `cash_balance`, and `inventory_value`.
+### Post-sale restocking & reporting
+The Sales Manager performs post-sale operations immediately after sale execution:
+- `execute_restock` scans inventory as of the request date and reorders items below their configured minimum stock level.
+- `get_financial_status` calls `generate_financial_report` and stores a validated `FinancialReport` in shared context.
 
 ---
 
@@ -113,12 +140,12 @@ After a sale is booked, the orchestrator calls `after_sales_routine`, which runs
 ```
 .
 ├── main.py                    # Entry point: builds Context, runs the test-scenario loop
-├── agents.py                  # The five worker agents + Orchestrator, each owning its tools
-├── config.py                  # Static values: db engine, catalog names, unit prices, working dir
-├── context.py                 # Context dataclass — shared state injected into agents/tools
-├── utils.py                   # DB helpers, date parsing, reorder_supply, validate_item
-├── inventory.py               # PAPER_SUPPLIES catalog (names, categories, unit prices)
-├── items_model.py             # RequestedItem + FinancialReport Pydantic models (shared agent contract)
+├── agents.py                  # Four specialized agents + Orchestrator
+├── config.py                  # DB engine, catalog data, embedding model, workflow constants
+├── context.py                 # Shared typed workflow state injected into agents/tools
+├── utils.py                   # DB, inventory, date, embedding, and transaction helpers
+├── inventory.py               # PAPER_CATALOG (names, categories, unit prices)
+├── models.py                  # RequestedItem + FinancialReport Pydantic models
 ├── quote_requests.csv         # Historical customer inquiries (seeds quote_requests table)
 ├── quotes.csv                 # Historical quotes (seeds quotes table)
 ├── quote_requests_sample.csv  # Test scenarios
@@ -176,12 +203,14 @@ This will:
 
 ## Design decisions
 
-- Structured state over free text: Passing a validated Pydantic model between agents (serialized as JSON) keeps every stage's output machine-checkable and prevents the LLM from silently dropping fields.
-- Deterministic tools, LLM for orchestration only: All money and inventory-affecting logic (stock math, discount rules, reorder decisions, transaction writes) lives in plain Python tools. The LLM decides when to call them, not what the numbers are.
-- Guard rails at every stage: Stage-ordering checks in the orchestrator's tools, duplicate-sale protection, shortfall re-verification, and cash-balance checks before supplier orders all limit the blast radius of any single agent mistake.
+- Shared typed state over prompt chaining: `RequestedItem` objects live in `Context`, so agents enrich the same authoritative state instead of passing serialized model JSON/schema text between prompts.
+- Deterministic matching and tools: catalog embeddings are cached once, semantic matching is done in Python, and all money/inventory-affecting logic remains deterministic.
+- Simpler orchestration: sales and post-sale responsibilities are handled by the same agent, reducing unnecessary agent boundaries.
+- Guard rails at every stage: stage-ordering checks, duplicate-sale protection, shortfall re-verification, and cash-balance checks before supplier orders limit inconsistent state.
 - Point-in-time correctness: Stock and cash are always evaluated as of the request date, so replaying historical requests in order produces a consistent ledger.
 
 ## Possible improvements (WIP)
 
-- Catalog name matching relies on the LLM choosing the closest valid name; a fuzzy-matching fallback could make it more robust.
-- Discounts use only the top-1 historical match; aggregating over several similar quotes could yield better pricing.
+- Improve catalog matching with a two-stage retrieval pipeline: use embedding similarity to retrieve the top-k catalog candidates, then apply a reranker before selecting the final match. This should better preserve attributes such as paper size, finish, weight, and material.
+- Handle multiple order lines that map to the same catalog item more robustly, since earlier sales can make previously calculated shortage quantities stale.
+- Improve quote-history matching by considering or reranking several similar historical quotes instead of relying only on the top-1 result.
