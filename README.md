@@ -41,49 +41,13 @@ The starter provides the base dataset, catalog, database setup, and utility scaf
 
 ## Architecture
 
+
+
 The system uses 4 specialized agents, all implemented as `ToolCallingAgent` instances and coordinated by a top-level orchestrator:
+![Multi-agent workflow](images/multi_agents_workflow.png)
+*Figure 1. End-to-end multi-agent order-processing workflow, showing orchestration, shared state, database interactions, and the customer response path.*
 
-```mermaid
-flowchart TD
-    C[Customer Request] --> O[Orchestrator]
 
-    O --> OP[Order Processor]
-    OP --> IM[Inventory Manager]
-    IM --> QM[Quote Manager]
-    QM --> SM[Sales Manager]
-
-    OP --> OP1[extract_item_description]
-
-    IM --> IM1[assign_inventory_name]
-    IM --> IM2[check_stock_inventory]
-    IM --> IM3[check_delivery_timeline]
-
-    QM --> QM1[calculate_discount_rate]
-
-    SM --> SM1[execute_sale]
-    SM --> SM2[execute_restock]
-    SM --> SM3[get_financial_status]
-
-    O --> O1[get_order_details]
-    O --> O2[manage_inventory]
-    O --> O3[prepare_quote]
-    O --> O4[prepare_sale_restock_financial_report]
-    O --> O5[get_order_state]
-
-    O --> CTX[(Shared Context)]
-    OP --> CTX
-    IM --> CTX
-    QM --> CTX
-    SM --> CTX
-
-    IM --> DB[(SQLite Database)]
-    QM --> DB
-    SM --> DB
-
-    SM --> S[Structured Order State]
-    S --> O
-    O --> R[Customer Response]
-```
 
 | Agent | Responsibility | Tools |
 |---|---|---|
@@ -92,6 +56,12 @@ flowchart TD
 | **Inventory Manager** | Matches customer wording to the catalog using embeddings, checks stock, and verifies supplier timing for shortages | `assign_inventory_name`, `check_stock_inventory`, `check_delivery_timeline` |
 | **Quote Manager** | Applies a discount based on historical quote data or requested quantity | `calculate_discount_rate` |
 | **Sales Manager** | Reorders shortfalls when feasible, executes sales, restocks low inventory, and generates the financial report | `execute_sale`, `execute_restock`, `get_financial_status` |
+
+### Agent tools and helper functions
+
+![Agent tools and helper functions](images/tools_helper_functions.png)
+*Figure 2. Agent-owned tools and the deterministic helper functions they use for inventory, quoting, sales, restocking, and financial reporting.*
+
 
 ### Data flow
 
