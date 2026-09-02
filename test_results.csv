@@ -1,41 +1,181 @@
 request_id,request_date,cash_balance,inventory_value,response
-1,2025-04-01,45149.7,4840.3,"Your request for the following paper supplies will be fulfilled:
-- 200 sheets of A4 glossy paper (Delivery Date: April 15, 2025)
-- 100 sheets of heavy cardstock (white) (Delivery Date: April 15, 2025)
-- 100 sheets of colored paper (assorted colors) (Delivery Date: April 15, 2025)
+1,2025-04-01,45075.34,4923.449999999999,"Dear Customer,
+
+Thank you for your order! Here’s the status of your requested items for the ceremony:
+
+1. **A4 glossy paper**: Successfully processed and will be delivered by **April 15, 2025**. You will receive a **10% bulk discount** on this item.
+2. **Heavy cardstock (white)**: Unfortunately, we could not fulfill this item as it could not be matched to our catalog.
+3. **Colored paper (assorted colors)**: Successfully processed and will be delivered by **April 15, 2025**. You will also receive a **10% bulk discount** on this item.
+
+If you have any further questions or need assistance, feel free to reach out!
+
+Best regards,
+Beaver's Choice Paper Company"
+2,2025-04-03,45116.09,4873.45,"Dear Customer,
+
+Thank you for your order! We are pleased to inform you that:
+- Your order of **500 sheets of colorful poster paper** has been successfully processed and will be delivered by **April 15, 2025**. You also received a **20% bulk discount** on this item.
+- Your order of **300 rolls of streamers** has also been successfully processed and will be delivered by **April 15, 2025** with a **20% bulk discount**.
+- Unfortunately, we could not fulfill your request for **200 balloons** as they could not be matched to our catalog.
+
+If you have any further questions or need assistance, feel free to reach out!
+
+Best regards,
+Beaver's Choice Paper Company"
+3,2025-04-04,45147.34,4873.45,"Thank you for your order! Here is the status of your requested items:
+
+1. **A4 paper**: Successfully processed! You will receive 10,000 sheets by **April 11, 2025**. A bulk discount of **20%** has been applied.
+2. **A3 paper**: Unfortunately, we could not fulfill your request for 5,000 sheets due to a shortage. We recommend checking back later or considering a different quantity.
+3. **Printer paper**: Successfully processed! You will receive 500 reams by **April 8, 2025**. A bulk discount of **20%** has been applied.
+
+If you have any further questions or need assistance, feel free to reach out!"
+4,2025-04-05,45155.22,4873.45,"Your order has been successfully processed! 
+
+1. **High-quality, recycled cardstock in various colors**: 500 sheets will be delivered by April 15, 2025. 
+2. **A4 size printer paper**: 250 sheets will also be delivered by April 15, 2025. 
+
+Additionally, you received a 10% bulk discount on your order. Thank you for choosing us!"
+5,2025-04-05,45163.09,4868.95,"Thank you for your order! Here’s the status of your requested items:
+
+1. **8.5""x11"" colored paper**: Your order for 500 sheets has been successfully processed and will be delivered by April 15, 2025. You also received a 20% bulk discount on this item.
+
+2. **Cardstock in various colors**: Unfortunately, we could not fulfill your order for 300 sheets due to a shortage. We apologize for the inconvenience.
+
+3. **Decorative washi tape**: Your order for 200 rolls has been successfully processed and will be delivered by April 15, 2025. A 20% bulk discount applies to this item as well.
+
+If you have any further questions or need assistance, feel free to reach out!"
+6,2025-04-06,45168.28,4868.95,"Your order has been successfully processed! 
+
+1. **Colorful construction paper**: 500 sheets have been successfully processed and will be delivered by April 15, 2025. A bulk discount of 20% has been applied to this item.
+2. **White printer paper**: 300 sheets have been successfully processed and will also be delivered by April 15, 2025. A bulk discount of 20% has been applied to this item.
+3. **Cardstock in various colors**: Unfortunately, we could not fulfill your request for 200 sheets due to a shortage of 57 sheets. However, we can order this item from our supplier, with a delivery date of April 7, 2025.
 
 Thank you for your order!"
-2,2025-04-03,45195.7,4840.3,"Your order will be partially fulfilled. The following items will be delivered by April 15, 2025:
-- 500 sheets of colorful poster paper
-- 300 rolls of streamers
+7,2025-04-07,45420.53,4568.95,"Dear Customer,
 
-Unfortunately, the 200 balloons cannot be shipped as they are not available."
-3,2025-04-04,45195.7,4840.3,"Unfortunately, your order cannot be fulfilled as none of the requested items are available. Please consider adjusting your order or checking back later."
-4,2025-04-05,45212.95,4827.8,"The request will be fulfilled. The delivery date for the items is April 15, 2025. You will receive 250 sheets of A4 size printer paper. However, the 500 sheets of high-quality, recycled cardstock in various colors cannot be shipped as they are short by 500 sheets."
-5,2025-04-05,45308.45,4732.8,"Your order will be partially fulfilled. The following items will be delivered by April 15, 2025:
-- 500 sheets of 8.5""x11"" colored paper
-- 300 sheets of cardstock in various colors
+Thank you for your order of various paper supplies for your upcoming exhibition. Here is the status of your requested items:
 
-Unfortunately, the 200 rolls of decorative washi tape cannot be shipped as they are not available. We will notify you once they are back in stock."
-6,2025-04-06,45330.5,4732.8,"The request will be fulfilled. The items will be delivered by April 15, 2025."
-7,2025-04-07,45682.55,4355.4,"The request will be fulfilled. The delivery date for the items is April 15, 2025."
-8,2025-04-07,45740.65,4336.599999999999,"The request will be partially fulfilled. The following items cannot be shipped: 500 sheets of A4 glossy paper and 1000 sheets of A4 matte paper. The items that will be delivered are: 2000 sheets of A5 colored paper with a delivery date of April 15, 2025."
-9,2025-04-07,45740.65,4336.599999999999,None of the items are available and the request cannot be fulfilled.
-10,2025-04-08,45764.65,4306.599999999999,"Your order will be partially fulfilled. The following item will be delivered by April 10, 2025: 200 sheets of cardstock. Unfortunately, we cannot fulfill the order for 500 sheets of A4 printing paper as it is not available."
-11,2025-04-08,45771.15,4306.599999999999,"Your order has been fulfilled. The supplies will be delivered by April 15, 2025."
-12,2025-04-08,45803.590000000004,4292.349999999999,"The request will be fulfilled. The delivery date for both items is April 15, 2025."
-13,2025-04-08,45826.69,4292.349999999999,"The request will be fulfilled. The delivery date for both items is April 15, 2025."
-14,2025-04-09,45826.69,4292.349999999999,"Unfortunately, your order cannot be fulfilled as none of the requested items are available. We are unable to provide the 5,000 sheets of A4 paper, 2,000 sheets of poster paper in various colors, and 500 sheets of cardstock."
-15,2025-04-12,45826.69,4292.349999999999,"Unfortunately, none of the items in your order can be fulfilled at this time. We are unable to provide the requested quantities of A4 white paper, A3 colored paper, and cardboard for signage."
-16,2025-04-13,45826.69,4292.349999999999,"Unfortunately, your order cannot be fulfilled as none of the requested items are available."
-17,2025-04-14,45871.69,4242.349999999999,"Your order will be partially fulfilled. The following item will be delivered by April 15, 2025:
-- 500 paper plates (biodegradable)
+1. **Glossy A4 paper**: Successfully processed. Delivery is scheduled for April 15, 2025. A bulk discount of 20% has been applied.
+2. **Matte A3 paper**: Successfully processed. Delivery is scheduled for April 15, 2025. A bulk discount of 20% has been applied.
+3. **Poster boards (24"" x 36"")**: Successfully processed. Delivery is scheduled for April 15, 2025. A bulk discount of 20% has been applied.
+4. **Heavyweight cardstock**: Successfully processed. Delivery is scheduled for April 15, 2025. A bulk discount of 20% has been applied.
 
-Unfortunately, the following items cannot be shipped:
-- 1000 sheets of A4 white printer paper
-- 500 sheets of A3 colored paper (assorted colors)
-- 2000 table napkins (white)
-- 1000 paper cups (biodegradable)"
-18,2025-04-14,45871.69,4242.349999999999,"Unfortunately, none of the items in your order can be fulfilled at this time. Your request for 500 sheets of high-quality white cardstock, 1000 sheets of standard printing paper, and 200 sheets of colored paper in assorted colors cannot be processed."
-19,2025-04-15,45871.69,4242.349999999999,"Unfortunately, your order cannot be fulfilled as none of the requested items are available."
-20,2025-04-17,45871.69,4242.349999999999,"Unfortunately, your order cannot be fulfilled as none of the requested items (5,000 flyers, 2,000 posters, and 10,000 tickets) are available."
+We appreciate your business and look forward to serving you again!
+
+Best regards,
+Beaver's Choice Paper Company"
+8,2025-04-07,45431.77,4568.95,"Dear Customer,
+
+Thank you for your order! We are pleased to inform you that the following items have been successfully processed:
+
+1. **A4 glossy paper**: 500 sheets will be delivered by April 15, 2025.
+2. **A5 colored paper**: 2000 sheets will be delivered by April 15, 2025.
+
+Additionally, we encountered some issues with the following items:
+- **A4 matte paper**: Unfortunately, we could not fulfill your request due to a shortage of 865 sheets. However, we can order them from our supplier, who can deliver by April 11, 2025.
+- **A4 recycled paper**: We also faced a shortage of 2865 sheets for this item. Similar to the matte paper, we can place an order with our supplier for delivery by April 14, 2025.
+
+As a token of appreciation for your large order, we are pleased to offer you a 20% discount on the items that were successfully processed.
+
+If you would like to proceed with the orders for the matte and recycled paper, please let us know!
+
+Best regards,
+Beaver's Choice Paper Company"
+9,2025-04-07,45433.869999999995,4568.95,"Dear Customer,
+
+Thank you for your order! Here is the status of your requested items:
+
+1. **A4 white printer paper**: Successfully processed. Your order will be delivered by April 10, 2025. A bulk discount of 10% has been applied.
+2. **A3 glossy paper**: Unfortunately, we could not fulfill this item as it is currently unavailable.
+3. **100% recycled kraft paper envelopes**: Successfully processed. Your order will be delivered by April 10, 2025. A bulk discount of 10% has been applied.
+
+If you have any questions or need further assistance, feel free to reach out!
+
+Best regards,
+Beaver's Choice Paper Company"
+10,2025-04-08,45457.869999999995,4538.95,"Thank you for your order! We successfully processed your request for 200 sheets of cardstock, which will be delivered by April 10, 2025. Additionally, we are unable to fulfill your order for 500 sheets of A4 printing paper due to a shortage of 365 units. Please note that you received a 20% bulk discount on both items. If you have any further questions or need assistance, feel free to reach out!"
+11,2025-04-08,45464.16,4538.95,"Your order has been successfully processed! Here are the details:
+
+1. **Colorful Cardstock**: 200 sheets will be delivered by April 15, 2025. A 10% bulk discount has been applied.
+2. **Standard Printer Paper**: 500 sheets will be delivered by April 15, 2025. A 10% bulk discount has been applied.
+3. **Paper Napkins**: 100 napkins will be delivered by April 15, 2025. A 10% bulk discount has been applied.
+
+Thank you for choosing Beaver's Choice Paper Company for your party supplies!"
+12,2025-04-08,45579.700000000004,4413.900000000001,"Your order has been successfully processed! You will receive 500 sheets of high-quality glossy paper and 300 sheets of sturdy cardstock by April 15, 2025. Additionally, you have received a 10% bulk discount on your order. Thank you for choosing us for your upcoming show!"
+13,2025-04-08,45583.450000000004,4413.900000000001,"Dear Customer,
+
+Thank you for your order! We are pleased to inform you that your order for 500 sheets of A3 glossy paper has been successfully processed and will be delivered by April 15, 2025. Additionally, we are offering a 10% bulk discount on this item.
+
+However, we regret to inform you that we cannot fulfill your order for 300 sheets of A4 matte paper due to a shortage of 165 sheets. We can place an order with our supplier, and they will be able to deliver by April 12, 2025, if you would like to proceed with that.
+
+Please let us know how you would like to proceed with the A4 matte paper.
+
+Best regards,
+Beaver's Choice Paper Company"
+14,2025-04-09,45587.200000000004,4413.900000000001,"Dear Customer,
+
+Thank you for your order of high-quality paper supplies. Here is the status of your requested items:
+
+1. **A4 paper**: Unfortunately, we could not fulfill your request for 5,000 sheets due to a shortage of 4,865 sheets. 
+2. **Poster paper in various colors**: We are unable to fulfill your request for 2,000 sheets due to a complete shortage.
+3. **Cardstock**: Your order for 500 sheets has been successfully processed and will be delivered by April 13, 2025. You will also receive a 20% bulk discount on this item.
+
+We appreciate your understanding and look forward to serving you in the future!
+
+Best regards,
+Beaver's Choice Paper Company"
+15,2025-04-12,45587.200000000004,4413.900000000001,"Dear Customer,
+
+Thank you for your order request for high-quality paper supplies. Unfortunately, we were unable to fulfill your order due to the following reasons:
+
+1. **A4 white paper**: We have a shortage of 9865 sheets and cannot fulfill your request.
+2. **A3 colored paper (assorted colors)**: We have a shortage of 4857 sheets and cannot fulfill your request.
+3. **Cardboard for signage**: This item could not be matched to our catalog.
+
+We understand the importance of your upcoming demonstration and apologize for any inconvenience this may cause. Please let us know if you would like to adjust your order or if there is anything else we can assist you with.
+
+Additionally, we are pleased to inform you that a bulk discount of 20% applies to your order.
+
+Thank you for your understanding.
+
+Best regards,
+Beaver's Choice Paper Company"
+16,2025-04-13,45593.94,4413.900000000001,"Thank you for your order! Here's the status of your requested items:
+
+1. **A4 printer paper**: Unfortunately, we could not fulfill this item due to a shortage of 365 units.
+2. **Colorful construction paper**: This item has been successfully processed and will be delivered by **April 14, 2025**. You also received a **10% bulk discount** on this item.
+3. **Poster board**: This item has been successfully processed and will also be delivered by **April 14, 2025**. A **10% bulk discount** applies here as well.
+
+If you have any further questions or need assistance, feel free to reach out!"
+17,2025-04-14,45633.94,4363.900000000001,"Thank you for your order! We successfully processed the following item:
+- **500 paper plates (biodegradable)**: This item will be delivered by **April 15, 2025**.
+
+Unfortunately, we could not fulfill the following items due to shortages:
+- **1000 sheets of A4 white printer paper** (shortage of 865)
+- **500 sheets of A3 colored paper (assorted colors)** (shortage of 357)
+- **2000 table napkins (white)** (shortage of 2000)
+- **1000 paper cups (biodegradable)** (shortage of 1000)
+
+Additionally, we are pleased to inform you that a **20% bulk discount** applies to your order. If you have any questions or need further assistance, please let us know!"
+18,2025-04-14,45634.93000000001,4363.900000000001,"Thank you for your order! We successfully processed the following item:
+- **Colored paper in assorted colors**: 200 sheets will be delivered by April 15, 2025. 
+
+Unfortunately, we could not fulfill the following items due to shortages:
+- **High-quality white cardstock**: 500 sheets
+- **Standard printing paper**: 1000 sheets
+
+Additionally, we are pleased to inform you that a bulk discount of 20% applies to your order. If you have any further questions or need assistance, feel free to reach out!"
+19,2025-04-15,45639.920000000006,4363.900000000001,"Dear Customer,
+
+Thank you for your order! Here is the status of your requested items:
+
+1. **A4 glossy paper**: Unfortunately, we could not fulfill this item due to a shortage of 1865 sheets. 
+2. **A3 matte paper**: We also could not fulfill this item due to a shortage of 1500 sheets.
+3. **Cardstock in assorted colors**: This item has been successfully processed and will be delivered by April 19, 2025. 
+
+Additionally, we are pleased to offer a 20% bulk discount on your order.
+
+Thank you for your understanding, and we look forward to serving you in the future!"
+20,2025-04-17,45702.420000000006,4363.900000000001,"Thank you for your order! We are pleased to inform you that your order for 5,000 flyers and 2,000 posters has been successfully processed and will be delivered by May 15, 2025. Additionally, you will receive a 20% bulk discount on these items. 
+
+Unfortunately, we were unable to fulfill your request for 10,000 tickets as they could not be matched to our catalog. If you have any further questions or need assistance, please let us know!"

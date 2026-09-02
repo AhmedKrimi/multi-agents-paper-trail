@@ -1,5 +1,5 @@
 # List containing the different kinds of papers
-PAPER_SUPPLIES = [
+PAPER_CATALOG = [
     # Paper Types (priced per sheet unless specified)
     {"inventory_name": "A4 paper", "category": "paper", "unit_price": 0.05},
     {"inventory_name": "Letter-sized paper", "category": "paper", "unit_price": 0.06},

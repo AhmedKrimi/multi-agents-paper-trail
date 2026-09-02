@@ -1,21 +1,22 @@
 import ast
 import os
-from datetime import datetime, timedelta
-from config import working_dir
-from items_model import RequestedItem, FinancialReport
+from datetime import date, timedelta
 
 import numpy as np
 import pandas as pd
+from pydantic import TypeAdapter
 from sqlalchemy import Engine
 from sqlalchemy.sql import text
+
+from config import SUPPLIER_PRICE_FACTOR, embedder, working_dir
 from context import Context
+from inventory import PAPER_CATALOG
+from models import FinancialReport, RequestedItem
 
-from inventory import PAPER_SUPPLIES
 
-
-def _parse_date(value) -> datetime:
-    """Coerce anything date-like to a datetime object."""
-    return datetime.fromisoformat(str(value).split("T")[0])
+def _parse_date(value) -> date:
+    """Coerce anything date-like to a date object."""
+    return date.fromisoformat(str(value).split("T")[0])
 
 
 def _as_date(value) -> str:
@@ -25,12 +26,12 @@ def _as_date(value) -> str:
 
 # Given below are some utility functions you can use to implement your multi-agent system
 def generate_sample_inventory(
-    PAPER_SUPPLIES: list, coverage: float = 0.4, seed: int = 137
+    PAPER_CATALOG: list, coverage: float = 0.4, seed: int = 137
 ) -> pd.DataFrame:
     """
     Generate inventory for exactly a specified percentage of items from the full paper supply list.
 
-    This function randomly selects exactly `coverage` × N items from the `PAPER_SUPPLIES` list,
+    This function randomly selects exactly `coverage` × N items from the `PAPER_CATALOG` list,
     and assigns each selected item:
     - a random stock quantity between 200 and 800,
     - a minimum stock level between 50 and 150.
@@ -38,7 +39,7 @@ def generate_sample_inventory(
     The random seed ensures reproducibility of selection and stock levels.
 
     Args:
-        PAPER_SUPPLIES (list): A list of dictionaries, each representing a paper item with
+        PAPER_CATALOG (list): A list of dictionaries, each representing a paper item with
                                keys 'inventory_name', 'category', and 'unit_price'.
         coverage (float, optional): Fraction of items to include in the inventory (default is 0.4, or 40%).
         seed (int, optional): Random seed for reproducibility (default is 137).
@@ -55,15 +56,15 @@ def generate_sample_inventory(
     np.random.seed(seed)
 
     # Calculate number of items to include based on coverage
-    num_items = int(len(PAPER_SUPPLIES) * coverage)
+    num_items = int(len(PAPER_CATALOG) * coverage)
 
     # Randomly select item indices without replacement
     selected_indices = np.random.choice(
-        range(len(PAPER_SUPPLIES)), size=num_items, replace=False
+        range(len(PAPER_CATALOG)), size=num_items, replace=False
     )
 
-    # Extract selected items from PAPER_SUPPLIES list
-    selected_items = [PAPER_SUPPLIES[i] for i in selected_indices]
+    # Extract selected items from PAPER_CATALOG list
+    selected_items = [PAPER_CATALOG[i] for i in selected_indices]
 
     # Construct inventory records
     inventory = []
@@ -91,8 +92,6 @@ def get_all_inventory(db_engine: Engine, as_of_date: str) -> dict[str, int]:
     This function calculates the net quantity of each item by summing
     all stock orders and subtracting all sales up to and including the given date.
 
-    Only items with positive stock are included in the result.
-
     Args:
         db_engine (Engine) : database engine
         as_of_date (str): ISO-formatted date string (YYYY-MM-DD) representing the inventory cutoff.
@@ -113,7 +112,6 @@ def get_all_inventory(db_engine: Engine, as_of_date: str) -> dict[str, int]:
         WHERE inventory_name IS NOT NULL
         AND transaction_date <= :as_of_date
         GROUP BY inventory_name
-        HAVING stock > 0
     """
 
     # Execute the query with the date parameter
@@ -124,7 +122,7 @@ def get_all_inventory(db_engine: Engine, as_of_date: str) -> dict[str, int]:
 
 
 def get_stock_level(
-    db_engine: Engine, inventory_name: str, as_of_date: str | datetime
+    db_engine: Engine, inventory_name: str, as_of_date: str | date
 ) -> pd.DataFrame:
     """
     Retrieve the stock level of a specific item as of a given date.
@@ -135,13 +133,13 @@ def get_stock_level(
     Args:
         db_engine (Engine): Database engine
         inventory_name (str): The name of the item to look up.
-        as_of_date (str or datetime): The cutoff date (inclusive) for calculating stock.
+        as_of_date (str or date): The cutoff date (inclusive) for calculating stock.
 
     Returns:
         pd.DataFrame: A single-row DataFrame with columns 'inventory_name' and 'current_stock'.
     """
-    # Convert date to ISO string format if it's a datetime object
-    if isinstance(as_of_date, datetime):
+    # Convert date to ISO string format if it's a date object
+    if isinstance(as_of_date, date):
         as_of_date = _as_date(as_of_date.isoformat())
 
     # SQL query to compute net stock level for the item
@@ -196,7 +194,7 @@ def get_supplier_delivery_date(input_date_str: str, quantity: int) -> str:
         print(
             f"WARN (get_supplier_delivery_date): Invalid date format '{input_date_str}', using today as base."
         )
-        input_date_dt = datetime.now()
+        input_date_dt = date.today()
 
     # Determine delivery delay based on quantity
     if quantity <= 10:
@@ -215,7 +213,7 @@ def get_supplier_delivery_date(input_date_str: str, quantity: int) -> str:
     return _as_date(delivery_date_dt)
 
 
-def get_cash_balance(db_engine: Engine, as_of_date: str | datetime) -> float:
+def get_cash_balance(db_engine: Engine, as_of_date: str | date) -> float:
     """
     Calculate the current cash balance as of a specified date.
 
@@ -224,14 +222,17 @@ def get_cash_balance(db_engine: Engine, as_of_date: str | datetime) -> float:
 
     Args:
         db_engine (Engine): Database Engine
-        as_of_date (str or datetime): The cutoff date (inclusive) in ISO format or as a datetime object.
+        as_of_date (str or date): The cutoff date (inclusive) in ISO format or as a date object.
 
     Returns:
-        float: Net cash balance as of the given date. Returns 0.0 if no transactions exist or an error occurs.
+        float: Net cash balance as of the given date. Returns 0.0 if no transactions exist.
+
+    Raises:
+    Exception: Propagates database/query failures.
     """
     try:
-        # Convert date to ISO format if it's a datetime object
-        if isinstance(as_of_date, datetime):
+        # Convert date to ISO format if it's a date object
+        if isinstance(as_of_date, date):
             as_of_date = _as_date(as_of_date)
 
         # Query all transactions on or before the specified date
@@ -255,35 +256,36 @@ def get_cash_balance(db_engine: Engine, as_of_date: str | datetime) -> float:
 
     except Exception as e:
         print(f"Error getting cash balance: {e}")
-        return 0.0
+        raise
 
 
 def reorder_supply(
-    inventory_name: str, quantity: int, order_date: str, ctx: Context
+    inventory_name: str, quantity: int, order_date: date, ctx: Context
 ) -> bool:
     """Order item from the supplier
     Args:
         inventory_name (str): The name of the item to reorder from the supplier.
         quantity (int): Number of units to reorder from the supplier.
-        order_date (str): Date of the order in ISO 8601 format.
+        order_date (date): Date of the order in ISO 8601 format.
+        ctx (Context): Shared workflow context.
 
     Returns:
         bool: True, if Transaction is OK, otherwise False
+
+    Raises:
+        Exception: Propagates database/query failures.
     """
     if quantity <= 0:
-        print(
-            f"no ordering is needed for {inventory_name}, quantity: {quantity}")
+        print(f"no ordering is needed for {inventory_name}, quantity: {quantity}")
         return False
 
-    SUPPLIER_PRICE_FACTOR = 0.75
-
-    if inventory_name not in ctx.available_items:
+    if inventory_name not in ctx.catalog_items:
         print(
             f"Ordering transaction from the supplier of {inventory_name} has failed, {inventory_name} is not valid item"
         )
         return False
 
-    unit_price = ctx.products_price[inventory_name]
+    unit_price = ctx.product_prices[inventory_name]
     price = round(SUPPLIER_PRICE_FACTOR * unit_price * quantity, 2)
 
     try:
@@ -301,15 +303,14 @@ def reorder_supply(
             )
             return True
         else:
-            print(
-                f"Not enough cash to reorder {inventory_name} transaction has failed")
+            print(f"Not enough cash to reorder {inventory_name} transaction has failed")
             return False
     except Exception as e:
         print(f"Ordering {inventory_name} transaction has failed : {e}")
-        return False
+        raise
 
 
-def generate_financial_report(db_engine: Engine, as_of_date: str | datetime) -> dict:
+def generate_financial_report(db_engine: Engine, as_of_date: str | date) -> dict:
     """
     Generate a complete financial report for the company as of a specific date.
 
@@ -322,7 +323,7 @@ def generate_financial_report(db_engine: Engine, as_of_date: str | datetime) -> 
 
     Args:
         db_engine (Engine): Database engine
-        as_of_date (str or datetime): The date (inclusive) for which to generate the report.
+        as_of_date (str or date): The date (inclusive) for which to generate the report.
 
     Returns:
         Dict: A dictionary containing the financial report fields:
@@ -334,7 +335,7 @@ def generate_financial_report(db_engine: Engine, as_of_date: str | datetime) -> 
             - 'top_selling_products': List of top 5 products by revenue
     """
     # Normalize date input
-    if isinstance(as_of_date, datetime):
+    if isinstance(as_of_date, date):
         as_of_date = _as_date(as_of_date)
 
     # Get current cash balance
@@ -347,8 +348,7 @@ def generate_financial_report(db_engine: Engine, as_of_date: str | datetime) -> 
 
     # Compute total inventory value and summary by item
     for _, item in inventory_df.iterrows():
-        stock_info = get_stock_level(
-            db_engine, item["inventory_name"], as_of_date)
+        stock_info = get_stock_level(db_engine, item["inventory_name"], as_of_date)
         stock = stock_info["current_stock"].iloc[0]
         item_value = stock * item["unit_price"]
         inventory_value += item_value
@@ -371,12 +371,11 @@ def generate_financial_report(db_engine: Engine, as_of_date: str | datetime) -> 
         ORDER BY total_revenue DESC
         LIMIT 5
     """
-    top_sales = pd.read_sql(top_sales_query, db_engine,
-                            params={"date": as_of_date})
+    top_sales = pd.read_sql(top_sales_query, db_engine, params={"date": as_of_date})
     top_selling_products = top_sales.to_dict(orient="records")
 
     return {
-        "as_of_date": as_of_date,
+        "as_of_date": _parse_date(as_of_date),
         "cash_balance": cash,
         "inventory_value": inventory_value,
         "total_assets": cash + inventory_value,
@@ -389,7 +388,7 @@ def search_quote_history(
     db_engine: Engine, search_terms: list[str], limit: int = 5
 ) -> list[dict]:
     """
-    Retrieve a list of historical quotes that match any of the provided search terms.
+    Retrieve a list of historical quotes that match all of the provided search terms.
 
     The function searches both the original customer request (from `quote_requests`) and
     the explanation for the quote (from `quotes`) for each keyword. Results are sorted by
@@ -423,7 +422,7 @@ def search_quote_history(
         params[param_name] = f"%{term.lower()}%"
 
     # Combine conditions; fallback to always-true if no terms provided
-    where_clause = " OR ".join(conditions) if conditions else "1=1"
+    where_clause = " AND ".join(conditions) if conditions else "1=1"
 
     # Final SQL query to join quotes with quote_requests
     query = f"""
@@ -489,13 +488,12 @@ def init_database(db_engine: Engine, seed: int = 137) -> Engine:
         )
 
         # Set a consistent starting date
-        initial_date = _as_date(str(datetime(2025, 1, 1)))
+        initial_date = _as_date(str(date(2025, 1, 1)))
 
         # ----------------------------
         # 2. Load and initialize 'quote_requests' table
         # ----------------------------
-        quote_requests_df = pd.read_csv(
-            os.path.join(working_dir, "quote_requests.csv"))
+        quote_requests_df = pd.read_csv(os.path.join(working_dir, "quote_requests.csv"))
         quote_requests_df["id"] = range(1, len(quote_requests_df) + 1)
         quote_requests_df.to_sql(
             "quote_requests", db_engine, if_exists="replace", index=False
@@ -540,7 +538,7 @@ def init_database(db_engine: Engine, seed: int = 137) -> Engine:
         # ----------------------------
         # 4. Generate inventory and seed stock
         # ----------------------------
-        inventory_df = generate_sample_inventory(PAPER_SUPPLIES, seed=seed)
+        inventory_df = generate_sample_inventory(PAPER_CATALOG, seed=seed)
 
         # Seed initial transactions
         initial_transactions = []
@@ -574,8 +572,7 @@ def init_database(db_engine: Engine, seed: int = 137) -> Engine:
         )
 
         # Save the inventory reference table
-        inventory_df.to_sql("inventory", db_engine,
-                            if_exists="replace", index=False)
+        inventory_df.to_sql("inventory", db_engine, if_exists="replace", index=False)
 
         return db_engine
 
@@ -585,14 +582,31 @@ def init_database(db_engine: Engine, seed: int = 137) -> Engine:
 
 
 def create_transaction(
-    db_engine: Engine, inventory_name, transaction_type, quantity, price, date
+    db_engine: Engine,
+    inventory_name: str,
+    transaction_type: str,
+    quantity: int,
+    price: float,
+    date: str | date,
 ) -> int:
+    """Create a transaction and store it in the database.
+    Args:
+        db_engine (Engine): Database engine
+        inventory_name (str): Inventory item name
+        transaction_type (str): Either "stock_orders" or "sales"
+        quantity (int): Number of units
+        price (float): Total transaction price
+        date (str | date): Transaction date
+    Returns:
+        int: ID of the created transaction
+    Raises:
+        ValueError: If the transaction type is invalid
+    """
     try:
         date_str = _as_date(date)
 
         if transaction_type not in {"stock_orders", "sales"}:
-            raise ValueError(
-                "Transaction type must be 'stock_orders' or 'sales'")
+            raise ValueError("Transaction type must be 'stock_orders' or 'sales'")
 
         with db_engine.begin() as conn:
             conn.execute(
@@ -616,14 +630,16 @@ def create_transaction(
         raise
 
 
-def validate_model(model: type[RequestedItem | FinancialReport], model_dict: dict) -> RequestedItem | FinancialReport:
+def validate_model(
+    model: type[RequestedItem | FinancialReport], model_dict: dict
+) -> RequestedItem | FinancialReport:
     """Build a model, raises ValidationError on bad input"""
     return model(**model_dict)
 
 
 def get_min_stock_levels(db_engine: Engine) -> dict[str, int]:
     """
-    Retrieve the minimum stock level (reorder threshold) for each inventory item
+    Retrieve the minimum stock level of each item in the inventory
     Args:
         db_engine (Engine): Database engine
     Returns:
@@ -633,3 +649,24 @@ def get_min_stock_levels(db_engine: Engine) -> dict[str, int]:
         "SELECT inventory_name, min_stock_level FROM inventory", db_engine
     )
     return dict(zip(result["inventory_name"], result["min_stock_level"]))
+
+
+def return_full_state(items: list[RequestedItem]) -> str:
+    """Serialize the requested item list to JSON"""
+    requested_items_adapter = TypeAdapter(list[RequestedItem])
+    return requested_items_adapter.dump_json(items).decode("utf-8")
+
+
+def embed(text: list[str] | str) -> np.ndarray:
+    """Generate normalized embeddings for one or more text inputs"""
+    return embedder.encode(text, normalize_embeddings=True)
+
+
+def apply_bulk_discount(requested_items: list[RequestedItem], discount: float) -> None:
+    """Apply bulk discount to all the requested items
+    Args:
+        requested_items (list[RequestedItem]): Requested items by the customer
+        discount (float): Bulk discount to apply to each item
+    """
+    for item in requested_items:
+        item.discount_rate = discount
