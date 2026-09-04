@@ -9,9 +9,12 @@ from sqlalchemy import Engine
 from sqlalchemy.sql import text
 
 from config import SUPPLIER_PRICE_FACTOR, embedder, working_dir
+from config_logging import get_logger
 from context import Context
 from inventory import PAPER_CATALOG
 from models import FinancialReport, RequestedItem
+
+logger = get_logger(__name__)
 
 
 def _parse_date(value) -> date:
@@ -181,9 +184,11 @@ def get_supplier_delivery_date(input_date_str: str, quantity: int) -> str:
     Returns:
         str: Estimated delivery date in ISO format (YYYY-MM-DD).
     """
-    # Debug log (comment out in production if needed)
-    print(
-        f"FUNC (get_supplier_delivery_date): Calculating for qty {quantity} from date string '{input_date_str}'"
+
+    logger.debug(
+        "FUNC (get_supplier_delivery_date): Calculating for qty %s from date string %s",
+        quantity,
+        input_date_str,
     )
 
     # Attempt to parse the input date
@@ -191,8 +196,9 @@ def get_supplier_delivery_date(input_date_str: str, quantity: int) -> str:
         input_date_dt = _parse_date(input_date_str)
     except (ValueError, TypeError):
         # Fallback to current date on format error
-        print(
-            f"WARN (get_supplier_delivery_date): Invalid date format '{input_date_str}', using today as base."
+        logger.warning(
+            "(get_supplier_delivery_date): Invalid date format %s, using today as base",
+            input_date_str,
         )
         input_date_dt = date.today()
 
@@ -254,8 +260,8 @@ def get_cash_balance(db_engine: Engine, as_of_date: str | date) -> float:
 
         return 0.0
 
-    except Exception as e:
-        print(f"Error getting cash balance: {e}")
+    except Exception:
+        logger.exception("Error getting cash balance")
         raise
 
 
@@ -276,12 +282,16 @@ def reorder_supply(
         Exception: Propagates database/query failures.
     """
     if quantity <= 0:
-        print(f"no ordering is needed for {inventory_name}, quantity: {quantity}")
+        logger.info(
+            "no ordering is needed for %s, quantity: %s", inventory_name, quantity
+        )
         return False
 
     if inventory_name not in ctx.catalog_items:
-        print(
-            f"Ordering transaction from the supplier of {inventory_name} has failed, {inventory_name} is not valid item"
+        logger.warning(
+            "Ordering transaction from the supplier of %s has failed, %s is not valid item",
+            inventory_name,
+            inventory_name,
         )
         return False
 
@@ -290,7 +300,7 @@ def reorder_supply(
 
     try:
         if price <= get_cash_balance(ctx.db_engine, order_date):
-            res = create_transaction(
+            transaction_id = create_transaction(
                 ctx.db_engine,
                 inventory_name,
                 transaction_type="stock_orders",
@@ -298,15 +308,19 @@ def reorder_supply(
                 price=price,
                 date=order_date,
             )
-            print(
-                f"Ordering {inventory_name} transaction was successful - transaction ID: {res}"
+            logger.info(
+                "Ordering %s transaction was successful - transaction ID: %s",
+                inventory_name,
+                transaction_id,
             )
             return True
         else:
-            print(f"Not enough cash to reorder {inventory_name} transaction has failed")
+            logger.warning(
+                "Not enough cash to reorder %s transaction has failed", inventory_name
+            )
             return False
-    except Exception as e:
-        print(f"Ordering {inventory_name} transaction has failed : {e}")
+    except Exception:
+        logger.exception("Ordering %s transaction has failed", inventory_name)
         raise
 
 
@@ -577,7 +591,7 @@ def init_database(db_engine: Engine, seed: int = 137) -> Engine:
         return db_engine
 
     except Exception as e:
-        print(f"Error initializing database: {e}")
+        logger.error("Error initializing database: %s", e)
         raise
 
 
@@ -626,7 +640,7 @@ def create_transaction(
             return int(row_id)
 
     except Exception as e:
-        print(f"Error creating transaction: {e}")
+        logger.error("Error creating transaction: %s", e)
         raise
 
 

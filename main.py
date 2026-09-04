@@ -7,21 +7,29 @@ from smolagents import OpenAIServerModel
 
 from agents import Orchestrator
 from config import catalog_items, db_engine, product_prices, working_dir
+from config_logging import configure_logging, get_logger
 from context import Context
-from utils import embed, generate_financial_report, get_min_stock_levels, init_database
+from utils import (
+    embed,
+    generate_financial_report,
+    get_min_stock_levels,
+    init_database,
+)
+
+logger = get_logger(__name__)
+
 
 # Run the test scenarios
-
-
 def run_test_scenarios():
     """Run all sample customer requests through the multi-agent workflow"""
-    # Initialize shared context
+    # Initialize shared context and Logger
     context = Context(
         db_engine=db_engine,
         catalog_items=catalog_items,
         product_prices=product_prices,
         catalog_embeddings=embed(catalog_items),
     )
+
     # Initializing Database
     init_database(db_engine=context.db_engine)
     context.min_stock_levels = get_min_stock_levels(db_engine=context.db_engine)
@@ -35,7 +43,7 @@ def run_test_scenarios():
         quote_requests_sample.dropna(subset=["request_date"], inplace=True)
         quote_requests_sample = quote_requests_sample.sort_values("request_date")
     except Exception as e:
-        print(f"FATAL: Error loading test data: {e}")
+        logger.error("Error loading test data: %s", e)
         return
 
     # Get initial state
@@ -64,11 +72,11 @@ def run_test_scenarios():
     for idx, (_, row) in enumerate(quote_requests_sample.iterrows(), start=1):
         request_date = row["request_date"].strftime("%Y-%m-%d")
 
-        print(f"\n=== Request {idx} ===")
-        print(f"Context: {row['job']} organizing {row['event']}")
-        print(f"Request Date: {request_date}")
-        print(f"Cash Balance: ${current_cash:.2f}")
-        print(f"Inventory Value: ${current_inventory:.2f}")
+        logger.info("\n=== Request %s ===", idx)
+        logger.info("Context: %s organizing %s", row["job"], row["event"])
+        logger.info("Request Date: %s", request_date)
+        logger.info("Cash Balance: $%.2f", current_cash)
+        logger.info("Inventory Value: $%.2f", current_inventory)
 
         # Extract the request
         request_with_date = f"{row['request']} (Date of request: {request_date})"
@@ -80,9 +88,9 @@ def run_test_scenarios():
             current_cash = context.financial_report.cash_balance
             current_inventory = context.financial_report.inventory_value
 
-        print(f"RESPONSE: {response}")
-        print(f"Updated Cash: ${current_cash:.2f}")
-        print(f"Updated Inventory: ${current_inventory:.2f}")
+        logger.info("RESPONSE: %s", response)
+        logger.info("Updated Cash: $%.2f", current_cash)
+        logger.info("Updated Inventory: $%.2f", current_inventory)
 
         results.append(
             {
@@ -99,9 +107,9 @@ def run_test_scenarios():
     # Final report
     final_date = quote_requests_sample["request_date"].max().strftime("%Y-%m-%d")
     final_report = generate_financial_report(db_engine, final_date)
-    print("\n===== FINAL FINANCIAL REPORT =====")
-    print(f"Final Cash: ${final_report['cash_balance']:.2f}")
-    print(f"Final Inventory: ${final_report['inventory_value']:.2f}")
+    logger.info("===== FINAL FINANCIAL REPORT =====")
+    logger.info("Final Cash: $%.2f", final_report["cash_balance"])
+    logger.info("Final Inventory: $%.2f", final_report["inventory_value"])
 
     # Save results
     pd.DataFrame(results).to_csv(
@@ -111,4 +119,5 @@ def run_test_scenarios():
 
 
 if __name__ == "__main__":
-    results = run_test_scenarios()
+    configure_logging()
+    run_test_scenarios()

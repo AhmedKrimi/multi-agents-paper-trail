@@ -3,6 +3,7 @@ from pydantic import ValidationError
 from smolagents import OpenAIServerModel, ToolCallingAgent, tool
 
 from config import MATCHING_THRESHOLD
+from config_logging import get_logger
 from context import Context
 from models import FinancialReport, RequestedItem
 from utils import (
@@ -27,6 +28,7 @@ class OrderProcessorAgent(ToolCallingAgent):
 
     def __init__(self, model: OpenAIServerModel, ctx: Context):
         self.ctx = ctx
+        self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
             model=model,
@@ -36,6 +38,7 @@ class OrderProcessorAgent(ToolCallingAgent):
 
     def _build_tools(self):
         ctx = self.ctx
+        logger = self.logger
 
         @tool
         def extract_item_description(
@@ -62,8 +65,14 @@ class OrderProcessorAgent(ToolCallingAgent):
             )
             ctx.requested_items.append(item)
 
-            print(
-                f"INFO: item info: {item_description} has been extracted from the customer order"
+            logger.info(
+                "item description: %s, requested quantity: %s"
+                " order date: %s and delivery date: %s"
+                " has been extracted from the customer order",
+                item_description,
+                requested_quantity,
+                order_date,
+                delivery_date,
             )
 
             return item.model_dump_json()
@@ -76,6 +85,7 @@ class InventoryManagerAgent(ToolCallingAgent):
 
     def __init__(self, model: OpenAIServerModel, ctx: Context):
         self.ctx = ctx
+        self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
             model=model,
@@ -85,6 +95,7 @@ class InventoryManagerAgent(ToolCallingAgent):
 
     def _build_tools(self):
         ctx = self.ctx
+        logger = self.logger
 
         # Tools for inventory agent
         @tool
@@ -104,10 +115,19 @@ class InventoryManagerAgent(ToolCallingAgent):
                     if cos_sims[best_idx] >= MATCHING_THRESHOLD
                     else None
                 )
-                item.matched_catalog_item = matched_catalog_item
-                print(
-                    f"INFO: Item: {item.item_description} is assigned to the inventory name: {matched_catalog_item}, score: {cos_sims[best_idx]}"
-                )
+                if matched_catalog_item:
+                    item.matched_catalog_item = matched_catalog_item
+                    logger.info(
+                        "Item: %s is assigned to the inventory name: %s, score: %s",
+                        item.item_description,
+                        matched_catalog_item,
+                        cos_sims[best_idx],
+                    )
+                else:
+                    logger.warning(
+                        "Item %s could not be matched to the catalog",
+                        item.item_description,
+                    )
 
             return return_full_state(ctx.requested_items)
 
@@ -124,9 +144,6 @@ class InventoryManagerAgent(ToolCallingAgent):
                 quantity = item.requested_quantity
                 if matched_catalog_item not in ctx.catalog_items:
                     item.can_fulfill = False
-                    print(
-                        f"'{item.item_description}' is not available in the catalog, it cannot be fulfilled"
-                    )
                     continue
                 current_stock = int(
                     get_stock_level(ctx.db_engine, matched_catalog_item, order_date)[
@@ -161,6 +178,11 @@ class InventoryManagerAgent(ToolCallingAgent):
                     )
 
                     if _parse_date(supplier_delivery_date) > _parse_date(delivery_date):
+                        logger.warning(
+                            "Item %s cannot be delivered on time from the supplier (supplier delivery date: %s)",
+                            item.item_description,
+                            str(supplier_delivery_date),
+                        )
                         item.supplier_order_feasible = False
                     else:
                         item.supplier_order_feasible = True
@@ -177,6 +199,7 @@ class QuoteManagerAgent(ToolCallingAgent):
 
     def __init__(self, model: OpenAIServerModel, ctx: Context):
         self.ctx = ctx
+        self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
             model=model,
@@ -186,6 +209,7 @@ class QuoteManagerAgent(ToolCallingAgent):
 
     def _build_tools(self):
         ctx = self.ctx
+        logger = self.logger
 
         @tool
         def calculate_discount_rate() -> str:
@@ -210,8 +234,8 @@ class QuoteManagerAgent(ToolCallingAgent):
                 else:
                     discount_rate = 0.0
             else:
-                print(
-                    "INFO: No history found for this request, calculating the order_size"
+                logger.debug(
+                    "No history found for this request, calculating the order_size"
                 )
 
                 total_quantity = sum(
@@ -236,6 +260,7 @@ class SalesManagerAgent(ToolCallingAgent):
 
     def __init__(self, model: OpenAIServerModel, ctx: Context):
         self.ctx = ctx
+        self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
             model=model,
@@ -247,6 +272,7 @@ class SalesManagerAgent(ToolCallingAgent):
 
     def _build_tools(self):
         ctx = self.ctx
+        logger = self.logger
 
         # Tools for the sales agent
         @tool
@@ -267,13 +293,14 @@ class SalesManagerAgent(ToolCallingAgent):
                 discount_rate = item.discount_rate
 
                 if item_id in ctx.sold_order_line_ids:
-                    print(
-                        f"{item_id} selling transaction has already executed, skip to the next item"
+                    logger.warning(
+                        "%s selling transaction has already executed, skip to the next item",
+                        item_id,
                     )
                     continue
 
                 if matched_catalog_item not in ctx.catalog_items:
-                    print(f"transaction for {matched_catalog_item} has failed")
+                    logger.error("Transaction for %s has failed", matched_catalog_item)
                     continue
 
                 transaction_date = order_date
@@ -286,8 +313,10 @@ class SalesManagerAgent(ToolCallingAgent):
                         )["current_stock"].iloc[0]
                     )
                     if actual_shortage_quantity != shortage_quantity:
-                        print(
-                            f"ERROR: there is a mismatch between actual short by {actual_shortage_quantity} and the short by calculated by the inventory manager: {shortage_quantity}, sell aborted"
+                        logger.error(
+                            "Mismatch between actual short by %s and the short by calculated by the inventory manager: %s, sell aborted",
+                            actual_shortage_quantity,
+                            shortage_quantity,
                         )
                         item.sale_completed = False
                         continue
@@ -298,8 +327,10 @@ class SalesManagerAgent(ToolCallingAgent):
                         ctx=ctx,
                     )
                     if not supplier_order_succeeded:
-                        print(
-                            f"ERROR: Ordering {matched_catalog_item} with {shortage_quantity} has failed!"
+                        logger.warning(
+                            "Ordering %s with %s has failed!",
+                            matched_catalog_item,
+                            shortage_quantity,
                         )
                         item.sale_completed = False
                         item.can_fulfill = False
@@ -312,9 +343,12 @@ class SalesManagerAgent(ToolCallingAgent):
                     )["current_stock"].iloc[0]
                 )
                 if current_stock < quantity:
-                    print(
-                        f"ERROR: Selling {matched_catalog_item} failed! quantity in stock: {current_stock}"
-                        f" is not enough to cover requested quantity: {quantity}"
+                    logger.warning(
+                        "Selling %s failed! quantity in stock: %s"
+                        " is not enough to cover requested quantity: %s",
+                        matched_catalog_item,
+                        current_stock,
+                        quantity,
                     )
                     item.sale_completed = False
                     item.can_fulfill = False
@@ -339,14 +373,17 @@ class SalesManagerAgent(ToolCallingAgent):
                         )
                         ctx.sold_order_line_ids.add(item_id)
                         item.sale_completed = True
-                        print(
-                            f"INFO: Selling {matched_catalog_item} transaction was successful - price: {price} - transaction ID: {transaction_id}"
+                        logger.info(
+                            "Selling %s transaction was successful - price: %s - transaction ID: %s",
+                            matched_catalog_item,
+                            price,
+                            transaction_id,
                         )
-                    except Exception as e:
+                    except Exception:
                         item.sale_completed = False
                         item.can_fulfill = False
-                        print(
-                            f"Selling {matched_catalog_item} transaction has failed : {e}"
+                        logger.exception(
+                            "Selling %s transaction has failed", matched_catalog_item
                         )
                         raise
 
@@ -366,13 +403,19 @@ class SalesManagerAgent(ToolCallingAgent):
             )
             for item, stock in inventory_snapshot.items():
                 if item not in ctx.min_stock_levels:
-                    print(f"ERROR: Item {item} is not in stock")
+                    logger.warning(
+                        "No minimum stock level configured for %s; skipping restock",
+                        item,
+                    )
                     continue
                 min_stock_level = ctx.min_stock_levels[item]
                 if stock < min_stock_level:
                     restock_quantity = min_stock_level - stock
-                    print(
-                        f"ITEM: {item}, is short in stock (only: {stock} left), restocking with qnt: {restock_quantity}"
+                    logger.info(
+                        "item: %s, is short in stock (only: %s left), restocking with quantity: %s",
+                        item,
+                        stock,
+                        restock_quantity,
                     )
                     restock_succeeded = reorder_supply(
                         inventory_name=item,
@@ -382,6 +425,12 @@ class SalesManagerAgent(ToolCallingAgent):
                     )
                     if restock_succeeded:
                         restocked_items.append(item)
+                    else:
+                        logger.warning(
+                            "Supplier reorder failed for %s, quantity: %s",
+                            item,
+                            restock_quantity,
+                        )
             if restocked_items:
                 restocked_items_str = ", ".join(restocked_items)
                 return f"Following items got restocked: {restocked_items_str}"
@@ -405,9 +454,9 @@ class SalesManagerAgent(ToolCallingAgent):
                 ctx.financial_report = financial_report_model
                 return ctx.financial_report.model_dump_json()
             except ValidationError as e:
-                return (
-                    f"ERROR: Validation error: {e} - Financial report generation failed"
-                )
+                msg = f"Validation error: {e} - Financial report generation failed"
+                logger.error(msg)
+                return msg
 
         return [execute_sale, execute_restock, get_financial_status]
 
@@ -418,6 +467,7 @@ class Orchestrator(ToolCallingAgent):
     def __init__(self, model: OpenAIServerModel, ctx: Context):
         self.model = model
         self.ctx = ctx
+        self.orchestrator_logger = get_logger(self)
         # Initialize specialized agents
         self.inventory_manager = InventoryManagerAgent(model, ctx)
         self.order_processor = OrderProcessorAgent(model, ctx)
@@ -530,7 +580,7 @@ class Orchestrator(ToolCallingAgent):
             str: Message informing the customer about their order's execution and delivery timeline
         """
 
-        print("--- Processing New Order ---")
+        self.orchestrator_logger.info("--- Processing New Order ---")
 
         self.reset_workflow()
         # Use the orchestrator's own coordination workflow
