@@ -1,14 +1,21 @@
+import os
 from pathlib import Path
 
 from sentence_transformers import SentenceTransformer
 from sqlalchemy import create_engine
 
-from inventory import PAPER_CATALOG
+from supply_chain_agents.inventory import PAPER_CATALOG
 
 # Absolute path of the working directory
-working_dir = Path(__file__).parent
+PROJECT_ROOT = Path(__file__).parents[2]
+# Absolute path of data directory
+DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+# Path to database
+DB_DIR = os.path.join(DATA_DIR, "munder_difflin.db")
+# Absolute path of test directory
+TEST_DIR = os.path.join(PROJECT_ROOT, "tests")
 # Create an SQLite database
-db_engine = create_engine("sqlite:///munder_difflin.db")
+db_engine = create_engine(f"sqlite:///{DB_DIR}")
 # Extract catalog item names
 catalog_items = [paper["inventory_name"] for paper in PAPER_CATALOG]
 # Extract the price of each product in the catalog

@@ -1,7 +1,0 @@
-pandas
-typing
-openai
-SQLAlchemy
-python-dotenv
-smolagents
-sentence-transformers

@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 from numpy import ndarray
 from sqlalchemy import Engine
 
-from models import FinancialReport, RequestedItem
+from supply_chain_agents.models import FinancialReport, RequestedItem
 
 
 @dataclass
