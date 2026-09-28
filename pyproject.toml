@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "agentic-supply-chain-automation"
+version= "0.1.0"
+description= "Multi-agent system for automating supply-chain order processing, inventory, quoting, and sales."
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+    "pandas==3.0.5",
+    "typing==3.7.4.3",
+    "openai==2.47.0",
+    "SQLAlchemy==2.0.51",
+    "python-dotenv==1.2.2",
+    "smolagents==1.26.0",
+    "sentence-transformers==6.0.1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

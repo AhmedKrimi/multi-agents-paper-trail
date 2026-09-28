@@ -2,11 +2,11 @@ import numpy as np
 from pydantic import ValidationError
 from smolagents import OpenAIServerModel, ToolCallingAgent, tool
 
-from config import MATCHING_THRESHOLD
-from config_logging import get_logger
-from context import Context
-from models import FinancialReport, RequestedItem
-from utils import (
+from supply_chain_agents.config import MATCHING_THRESHOLD
+from supply_chain_agents.config_logging import get_logger
+from supply_chain_agents.context import Context
+from supply_chain_agents.models import FinancialReport, RequestedItem
+from supply_chain_agents.utils import (
     _parse_date,
     apply_bulk_discount,
     create_transaction,

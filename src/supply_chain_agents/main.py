@@ -5,11 +5,18 @@ import dotenv
 import pandas as pd
 from smolagents import OpenAIServerModel
 
-from agents import Orchestrator
-from config import catalog_items, db_engine, product_prices, working_dir
-from config_logging import configure_logging, get_logger
-from context import Context
-from utils import (
+from supply_chain_agents.agents import Orchestrator
+from supply_chain_agents.config import (
+    DATA_DIR,
+    PROJECT_ROOT,
+    TEST_DIR,
+    catalog_items,
+    db_engine,
+    product_prices,
+)
+from supply_chain_agents.config_logging import configure_logging, get_logger
+from supply_chain_agents.context import Context
+from supply_chain_agents.utils import (
     embed,
     generate_financial_report,
     get_min_stock_levels,
@@ -35,7 +42,7 @@ def run_test_scenarios():
     context.min_stock_levels = get_min_stock_levels(db_engine=context.db_engine)
     try:
         quote_requests_sample = pd.read_csv(
-            os.path.join(working_dir, "quote_requests_sample.csv")
+            os.path.join(DATA_DIR, "quote_requests_sample.csv")
         )
         quote_requests_sample["request_date"] = pd.to_datetime(
             quote_requests_sample["request_date"], format="%m/%d/%y", errors="coerce"
@@ -53,7 +60,7 @@ def run_test_scenarios():
     current_inventory = report["inventory_value"]
 
     # Load environment variables for the API key
-    dotenv.load_dotenv(dotenv_path=os.path.join(working_dir, ".env"))
+    dotenv.load_dotenv(dotenv_path=os.path.join(PROJECT_ROOT, ".env"))
     openai_api_key = os.getenv("OPENAI_API_KEY")
 
     # Initialize the model with the API key
@@ -101,7 +108,6 @@ def run_test_scenarios():
                 "response": response,
             }
         )
-
         time.sleep(1)
 
     # Final report
@@ -113,7 +119,7 @@ def run_test_scenarios():
 
     # Save results
     pd.DataFrame(results).to_csv(
-        os.path.join(working_dir, "test_results.csv"), index=False
+        os.path.join(TEST_DIR, "test_results.csv"), index=False
     )
     return results
 

@@ -109,18 +109,27 @@ The Sales Manager performs post-sale operations immediately after sale execution
 
 ```
 .
-├── main.py                    # Entry point: builds Context, runs the test-scenario loop
-├── agents.py                  # Four specialized agents + Orchestrator
-├── config.py                  # DB engine, catalog data, embedding model, workflow constants
-├── context.py                 # Shared typed workflow state injected into agents/tools
-├── utils.py                   # DB, inventory, date, embedding, and transaction helpers
-├── inventory.py               # PAPER_CATALOG (names, categories, unit prices)
-├── models.py                  # RequestedItem + FinancialReport Pydantic models
-├── quote_requests.csv         # Historical customer inquiries (seeds quote_requests table)
-├── quotes.csv                 # Historical quotes (seeds quotes table)
-├── quote_requests_sample.csv  # Test scenarios
-├── munder_difflin.db          # SQLite database (created at runtime)
-└── .env                       # OPENAI_API_KEY (not committed)
+├── data/
+│   ├── quote_requests.csv         # Historical customer inquiries used to seed the database
+│   ├── quote_requests_sample.csv  # Sample requests used by the scenario runner
+│   └── quotes.csv                 # Historical quotes used to seed the database
+├── images/                        # Architecture and project images used in the README
+├── src/
+│   └── supply_chain_agents/
+│       ├── __init__.py
+│       ├── agents.py              # Four specialized agents + Orchestrator
+│       ├── config_logging.py      # Application logging configuration
+│       ├── config.py              # Paths, DB engine, embedding model, workflow constants
+│       ├── context.py             # Shared typed workflow state injected into agents/tools
+│       ├── inventory.py           # PAPER_CATALOG (names, categories, unit prices)
+│       ├── main.py                # Entry point: builds Context and runs the scenarios
+│       ├── models.py              # RequestedItem + FinancialReport Pydantic models
+│       └── utils.py               # Database, inventory, finance, date, and helper functions
+├── tests/                         # test scripts and results
+├── .env                           # OPENAI_API_KEY (not committed)
+├── .gitignore
+├── pyproject.toml                 # Project metadata, dependencies, and build configuration
+└── README.md
 ```
 
 ### Database (SQLite via SQLAlchemy)

@@ -8,11 +8,11 @@ from pydantic import TypeAdapter
 from sqlalchemy import Engine
 from sqlalchemy.sql import text
 
-from config import SUPPLIER_PRICE_FACTOR, embedder, working_dir
-from config_logging import get_logger
-from context import Context
-from inventory import PAPER_CATALOG
-from models import FinancialReport, RequestedItem
+from supply_chain_agents.config import DATA_DIR, SUPPLIER_PRICE_FACTOR, embedder
+from supply_chain_agents.config_logging import get_logger
+from supply_chain_agents.context import Context
+from supply_chain_agents.inventory import PAPER_CATALOG
+from supply_chain_agents.models import FinancialReport, RequestedItem
 
 logger = get_logger(__name__)
 
@@ -27,7 +27,7 @@ def _as_date(value) -> str:
     return _parse_date(value).strftime("%Y-%m-%d")
 
 
-# Given below are some utility functions you can use to implement your multi-agent system
+# Generate the inventory
 def generate_sample_inventory(
     PAPER_CATALOG: list, coverage: float = 0.4, seed: int = 137
 ) -> pd.DataFrame:
@@ -507,7 +507,7 @@ def init_database(db_engine: Engine, seed: int = 137) -> Engine:
         # ----------------------------
         # 2. Load and initialize 'quote_requests' table
         # ----------------------------
-        quote_requests_df = pd.read_csv(os.path.join(working_dir, "quote_requests.csv"))
+        quote_requests_df = pd.read_csv(os.path.join(DATA_DIR, "quote_requests.csv"))
         quote_requests_df["id"] = range(1, len(quote_requests_df) + 1)
         quote_requests_df.to_sql(
             "quote_requests", db_engine, if_exists="replace", index=False
@@ -516,7 +516,7 @@ def init_database(db_engine: Engine, seed: int = 137) -> Engine:
         # ----------------------------
         # 3. Load and transform 'quotes' table
         # ----------------------------
-        quotes_df = pd.read_csv(os.path.join(working_dir, "quotes.csv"))
+        quotes_df = pd.read_csv(os.path.join(DATA_DIR, "quotes.csv"))
         quotes_df["request_id"] = range(1, len(quotes_df) + 1)
         quotes_df["order_date"] = initial_date
 
