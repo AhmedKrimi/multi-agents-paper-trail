@@ -8,7 +8,7 @@ def get_logger(obj) -> logging.Logger:
     return logging.getLogger(f"{obj.__class__.__module__}.{obj.__class__.__name__}")
 
 
-def configure_logging() -> None:
+def configure_logging() -> None:  # pragma: no cover
     """Configure application-wide logging format and default level"""
     logging.basicConfig(
         level=logging.INFO,

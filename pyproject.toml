@@ -7,11 +7,10 @@ name = "agentic-supply-chain-automation"
 version= "0.1.0"
 description= "Multi-agent system for automating supply-chain order processing, inventory, quoting, and sales."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 
 dependencies = [
     "pandas==3.0.5",
-    "typing==3.7.4.3",
     "openai==2.47.0",
     "SQLAlchemy==2.0.51",
     "python-dotenv==1.2.2",
@@ -22,7 +21,13 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-cov"
 ]
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.coverage.report]
+omit = [
+    '*/supply_chain_agents/main.py',
+    ]
