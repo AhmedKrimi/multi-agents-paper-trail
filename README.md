@@ -125,10 +125,12 @@ The Sales Manager performs post-sale operations immediately after sale execution
 │       ├── main.py                # Entry point: builds Context and runs the scenarios
 │       ├── models.py              # RequestedItem + FinancialReport Pydantic models
 │       └── utils.py               # Database, inventory, finance, date, and helper functions
-├── tests/                         # test scripts and results
+├── tests/
+│   └── test_e2e.py                # End-to-end workflow tests
 ├── .env                           # OPENAI_API_KEY (not committed)
 ├── .gitignore
 ├── pyproject.toml                 # Project metadata, dependencies, and build configuration
+├── pytest.ini                     # Test discovery and e2e marker registration
 └── README.md
 ```
 
@@ -149,11 +151,11 @@ The company starts with a $50,000 cash balance and randomized initial stock.
 
 ### Requirements
 
-- Python 3.10+
+- Python 3.11+
 - An OpenAI API key (the system uses `gpt-4o-mini` via smolagents' `OpenAIServerModel`)
 
 ```bash
-pip install -r requirements.txt
+python -m pip install -e ".[dev]"
 ```
 
 ### Configuration
@@ -164,12 +166,12 @@ Create a `.env` file in the parent directory of the source folder:
 OPENAI_API_KEY=sk-...
 ```
 
-The model is instantiated with `temperature=0.0` and `parallel_tool_calls=False` for deterministic, sequential tool execution.
+The model is instantiated with `temperature=0.0` and `parallel_tool_calls=False` to reduce output variability and disable parallel tool calls. Live model responses can still vary between runs.
 
 ### Run
 
 ```bash
-python main.py
+python -m supply_chain_agents.main
 ```
 
 This will:
@@ -177,6 +179,61 @@ This will:
 2. Load and date-sort the test scenarios from `quote_requests_sample.csv`.
 3. Process each request through the orchestrator, printing the response plus updated cash and inventory value after every order.
 4. Print a final financial report and write all results to `test_results.csv`.
+
+---
+
+## Tests & coverage
+
+The first test suite contains 14 end-to-end tests in `tests/test_e2e.py`, using sample customer requests from `data/quote_requests_sample.csv`. These tests exercise the full agent workflow and assert structured order-line state, including catalog matches, quantities, fulfillment decisions, supplier feasibility, sale completion, and financial-report presence where applicable.
+
+### Scenarios covered
+
+| Area | Scenarios |
+|---|---|
+| Inventory fulfillment | Fulfillment from available stock; replenishment of a shortage before completing a sale |
+| Mixed orders | Rejection of an unmatched item alongside supplier fulfillment of another item |
+| Catalog matching | Underspecified requests; non-exact descriptions; product variants; dimensions; size and finish; distinct variants within one order |
+| Rejection paths | Supplier delivery infeasibility; unmatched lines without aborting the workflow; shortages with infeasible replenishment; insufficient cash despite feasible supplier timing |
+| Workflow state | Processing two orders consecutively and checking that their extracted item descriptions do not overlap |
+
+### Test database and execution
+
+Tests use `tests/test_munder_difflin.db`, separate from the application's `data/munder_difflin.db`. An autouse fixture calls `init_database()` before each test to restore the test database's seeded baseline. The orchestrator is shared for the session and resets its transient workflow state when processing each new order. Run this suite sequentially because it uses one shared test database.
+
+These are live integration tests: they require `OPENAI_API_KEY`, make paid model API calls, and use the BGE-M3 embedding model, which may need downloading on the first run. The `e2e` marker selects the suite; registering the marker alone does not exclude it from a plain `pytest` run.
+
+From the repository root, run:
+
+```bash
+python -m pytest -m e2e tests/test_e2e.py
+```
+
+### Coverage
+
+Generate both a terminal report showing missing lines and an HTML report:
+
+```bash
+python -m pytest -m e2e tests/test_e2e.py --cov=supply_chain_agents --cov-config=pyproject.toml --cov-report=term-missing --cov-report=html
+```
+
+Open `htmlcov/index.html` and select a module to inspect its missed executable lines. The report omits `supply_chain_agents/main.py`; `configure_logging()` is excluded using `# pragma: no cover`.
+
+The coverage report generated reports 90% overall statement coverage (425 of 473 statements executed, with 48 missed). Percentages below are rounded as displayed in the HTML report.
+
+| Module | Statements | Missed | Coverage |
+|---|---:|---:|---:|
+| `agents.py` | 248 | 26 | 90% |
+| `config.py` | 17 | 0 | 100% |
+| `config_logging.py` | 5 | 0 | 100% |
+| `context.py` | 14 | 0 | 100% |
+| `inventory.py` | 1 | 0 | 100% |
+| `models.py` | 21 | 0 | 100% |
+| `utils.py` | 167 | 22 | 87% |
+| **Total** | **473** | **48** | **90%** |
+
+The logging module's percentage applies to its remaining measured statements after the exclusion. The empty `__init__.py` contains no executable statements and is omitted from this summary.
+
+Coverage measures executed statements; it does not establish correctness or guarantee repeatable live model responses. The suite currently focuses on workflow-state assertions rather than exhaustive ledger or financial calculations.
 
 ---
 

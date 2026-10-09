@@ -29,7 +29,7 @@ def _as_date(value) -> str:
 
 # Generate the inventory
 def generate_sample_inventory(
-    PAPER_CATALOG: list, coverage: float = 0.4, seed: int = 137
+    PAPER_CATALOG: list, coverage: float = 1.0, seed: int = 137
 ) -> pd.DataFrame:
     """
     Generate inventory for exactly a specified percentage of items from the full paper supply list.
