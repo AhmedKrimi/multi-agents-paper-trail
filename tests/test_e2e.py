@@ -4,16 +4,18 @@ import dotenv
 import pandas as pd
 import pytest
 from smolagents import OpenAIServerModel
+
 from supply_chain_agents.agents import Orchestrator
 from supply_chain_agents.config import (
     DATA_DIR,
     PROJECT_ROOT,
     catalog_items,
-    test_db_engine,
     product_prices,
+    test_db_engine,
 )
 from supply_chain_agents.context import Context
-from supply_chain_agents.utils import embed, get_min_stock_levels, init_database
+from supply_chain_agents.embeddings import embed
+from supply_chain_agents.utils import get_min_stock_levels, init_database
 
 
 @pytest.fixture(scope="session")

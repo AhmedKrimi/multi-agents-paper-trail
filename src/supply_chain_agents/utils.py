@@ -8,7 +8,7 @@ from pydantic import TypeAdapter
 from sqlalchemy import Engine
 from sqlalchemy.sql import text
 
-from supply_chain_agents.config import DATA_DIR, SUPPLIER_PRICE_FACTOR, embedder
+from supply_chain_agents.config import DATA_DIR, SUPPLIER_PRICE_FACTOR
 from supply_chain_agents.config_logging import get_logger
 from supply_chain_agents.context import Context
 from supply_chain_agents.inventory import PAPER_CATALOG
@@ -669,11 +669,6 @@ def return_full_state(items: list[RequestedItem]) -> str:
     """Serialize the requested item list to JSON"""
     requested_items_adapter = TypeAdapter(list[RequestedItem])
     return requested_items_adapter.dump_json(items).decode("utf-8")
-
-
-def embed(text: list[str] | str) -> np.ndarray:
-    """Generate normalized embeddings for one or more text inputs"""
-    return embedder.encode(text, normalize_embeddings=True)
 
 
 def apply_bulk_discount(requested_items: list[RequestedItem], discount: float) -> None:

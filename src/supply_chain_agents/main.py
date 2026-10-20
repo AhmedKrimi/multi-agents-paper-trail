@@ -16,8 +16,8 @@ from supply_chain_agents.config import (
 )
 from supply_chain_agents.config_logging import configure_logging, get_logger
 from supply_chain_agents.context import Context
+from supply_chain_agents.embeddings import embed
 from supply_chain_agents.utils import (
-    embed,
     generate_financial_report,
     get_min_stock_levels,
     init_database,

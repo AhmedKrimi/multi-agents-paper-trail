@@ -5,12 +5,12 @@ from pydantic import ValidationError
 
 from supply_chain_agents.config import MATCHING_THRESHOLD
 from supply_chain_agents.context import Context
+from supply_chain_agents.embeddings import embed
 from supply_chain_agents.models import FinancialReport
 from supply_chain_agents.utils import (
     _parse_date,
     apply_bulk_discount,
     create_transaction,
-    embed,
     generate_financial_report,
     get_all_inventory,
     get_stock_level,
