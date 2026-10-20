@@ -5,7 +5,7 @@ from pydantic import ValidationError
 
 from supply_chain_agents.config import MATCHING_THRESHOLD
 from supply_chain_agents.embeddings import embed
-from supply_chain_agents.models import FinancialReport
+from supply_chain_agents.models import FinancialReport, RequestedItem
 from supply_chain_agents.utils import (
     _parse_date,
     apply_bulk_discount,
@@ -20,6 +20,49 @@ from supply_chain_agents.utils import (
     validate_model,
 )
 from supply_chain_agents.workflow_state import WorkflowState
+
+
+def add_order_item(
+    item_description: str,
+    requested_quantity: int,
+    order_date: str,
+    delivery_date: str,
+    workflow_state: WorkflowState,
+    logger: Logger | None,
+) -> str:
+    """Add an order item to the requested items in the shared workflow state
+
+    Args:
+        item_description (str):  original item description extracted from the customer request
+        requested_quantity (int): requested_quantity of the item in the customer request
+        order_date (str): date of the order by the customer in <YYYY-MM-DD> format
+        delivery_date (str): delivery date expected of the item in the customer request in <YYYY-MM-DD>
+        workflow_state (WorkflowState): Shared order state and database dependencies.
+        logger (Logger): Logger for operation outcomes and errors.
+    Returns:
+        str: JSON string representing the new RequestedItem with its extracted item_description, requested_quantity, order_date and delivery_date
+    """
+
+    item = RequestedItem(
+        item_description=item_description,
+        requested_quantity=requested_quantity,
+        order_date=_parse_date(order_date),
+        delivery_date=_parse_date(delivery_date),
+    )
+    workflow_state.requested_items.append(item)
+
+    if logger:
+        logger.info(
+            "item description: %s, requested quantity: %s"
+            " order date: %s and delivery date: %s"
+            " has been extracted from the customer order",
+            item_description,
+            requested_quantity,
+            order_date,
+            delivery_date,
+        )
+
+    return item.model_dump_json()
 
 
 def assign_inventory_name(workflow_state: WorkflowState, logger: Logger) -> str:

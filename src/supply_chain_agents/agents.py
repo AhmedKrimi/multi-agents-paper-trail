@@ -1,8 +1,8 @@
 from smolagents import OpenAIServerModel, ToolCallingAgent, tool
 
 from supply_chain_agents.config_logging import get_logger
-from supply_chain_agents.models import RequestedItem
 from supply_chain_agents.order_services import (
+    add_order_item,
     assign_inventory_name,
     calculate_discount_rate,
     check_delivery_timeline,
@@ -12,7 +12,6 @@ from supply_chain_agents.order_services import (
     get_financial_status,
 )
 from supply_chain_agents.utils import (
-    _parse_date,
     return_full_state,
 )
 from supply_chain_agents.workflow_state import WorkflowState
@@ -43,35 +42,23 @@ class OrderProcessorAgent(ToolCallingAgent):
             order_date: str,
             delivery_date: str,
         ) -> str:
-            """Extract item info from the customer request
+            """Extract item info from the customer request and create a new RequestedItem
             Args:
                 item_description (str):  original item description extracted from the customer request
                 requested_quantity (int): requested_quantity of the item in the customer request
                 order_date (str): date of the order by the customer in <YYYY-MM-DD> format
                 delivery_date (str): delivery date expected of the item in the customer request in <YYYY-MM-DD>
             Returns:
-                str: JSON string representing the RequestedItem with their extracted item_description, requested_quantity, order_date and delivery_date
+                str: JSON string representing the new RequestedItem with its extracted item_description, requested_quantity, order_date and delivery_date
             """
-
-            item = RequestedItem(
-                item_description=item_description,
-                requested_quantity=requested_quantity,
-                order_date=_parse_date(order_date),
-                delivery_date=_parse_date(delivery_date),
-            )
-            workflow_state.requested_items.append(item)
-
-            logger.info(
-                "item description: %s, requested quantity: %s"
-                " order date: %s and delivery date: %s"
-                " has been extracted from the customer order",
+            return add_order_item(
                 item_description,
                 requested_quantity,
                 order_date,
                 delivery_date,
+                workflow_state,
+                logger,
             )
-
-            return item.model_dump_json()
 
         return [extract_item_description]
 
