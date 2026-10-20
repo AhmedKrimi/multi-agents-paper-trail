@@ -7,7 +7,7 @@ from supply_chain_agents.models import FinancialReport, RequestedItem
 
 
 @dataclass
-class Context:
+class WorkflowState:
     """Shared state used by the agent workflow"""
 
     db_engine: Engine

@@ -1,7 +1,6 @@
 from smolagents import OpenAIServerModel, ToolCallingAgent, tool
 
 from supply_chain_agents.config_logging import get_logger
-from supply_chain_agents.context import Context
 from supply_chain_agents.models import RequestedItem
 from supply_chain_agents.order_services import (
     assign_inventory_name,
@@ -16,14 +15,15 @@ from supply_chain_agents.utils import (
     _parse_date,
     return_full_state,
 )
+from supply_chain_agents.workflow_state import WorkflowState
 
 
 # Set up the different agents
 class OrderProcessorAgent(ToolCallingAgent):
     """Agent responsible for extracting information from customer requests"""
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
-        self.ctx = ctx
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
+        self.workflow_state = workflow_state
         self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
@@ -33,7 +33,7 @@ class OrderProcessorAgent(ToolCallingAgent):
         )
 
     def _build_tools(self):
-        ctx = self.ctx
+        workflow_state = self.workflow_state
         logger = self.logger
 
         @tool
@@ -59,7 +59,7 @@ class OrderProcessorAgent(ToolCallingAgent):
                 order_date=_parse_date(order_date),
                 delivery_date=_parse_date(delivery_date),
             )
-            ctx.requested_items.append(item)
+            workflow_state.requested_items.append(item)
 
             logger.info(
                 "item description: %s, requested quantity: %s"
@@ -79,8 +79,8 @@ class OrderProcessorAgent(ToolCallingAgent):
 class InventoryManagerAgent(ToolCallingAgent):
     """Agent responsible for managing the inventory"""
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
-        self.ctx = ctx
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
+        self.workflow_state = workflow_state
         self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
@@ -90,7 +90,7 @@ class InventoryManagerAgent(ToolCallingAgent):
         )
 
     def _build_tools(self):
-        ctx = self.ctx
+        workflow_state = self.workflow_state
         logger = self.logger
 
         # Tools for inventory agent
@@ -101,7 +101,7 @@ class InventoryManagerAgent(ToolCallingAgent):
             Returns:
                 str: List of the RequestedItems with their updated matched_catalog_item closest to item_description
             """
-            return assign_inventory_name(ctx, logger)
+            return assign_inventory_name(workflow_state, logger)
 
         @tool
         def check_stock_inventory_tool() -> str:
@@ -110,7 +110,7 @@ class InventoryManagerAgent(ToolCallingAgent):
                 str: List of requested items with their status in the inventory (can_fulfill, shortage_quantity) updated
             """
 
-            return check_stock_inventory(ctx)
+            return check_stock_inventory(workflow_state)
 
         @tool
         def check_delivery_timeline_tool() -> str:
@@ -118,7 +118,7 @@ class InventoryManagerAgent(ToolCallingAgent):
             Returns:
                 str: list of all requested items (with supplier_order_feasible/supplier_delivery_date updated)
             """
-            return check_delivery_timeline(ctx, logger)
+            return check_delivery_timeline(workflow_state, logger)
 
         return [
             assign_inventory_name_tool,
@@ -130,8 +130,8 @@ class InventoryManagerAgent(ToolCallingAgent):
 class QuoteManagerAgent(ToolCallingAgent):
     """Agent responsible for calculating item discounts and pricing"""
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
-        self.ctx = ctx
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
+        self.workflow_state = workflow_state
         self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
@@ -141,7 +141,7 @@ class QuoteManagerAgent(ToolCallingAgent):
         )
 
     def _build_tools(self):
-        ctx = self.ctx
+        workflow_state = self.workflow_state
         logger = self.logger
 
         @tool
@@ -151,7 +151,7 @@ class QuoteManagerAgent(ToolCallingAgent):
             Returns:
                 str: List of requested items with the calculated discount_rate
             """
-            return calculate_discount_rate(ctx, logger)
+            return calculate_discount_rate(workflow_state, logger)
 
         return [calculate_discount_rate_tool]
 
@@ -159,8 +159,8 @@ class QuoteManagerAgent(ToolCallingAgent):
 class SalesManagerAgent(ToolCallingAgent):
     "Agent responsible for executing orders, and performing after-sales operations, including restocking and financial reporting"
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
-        self.ctx = ctx
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
+        self.workflow_state = workflow_state
         self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
@@ -172,7 +172,7 @@ class SalesManagerAgent(ToolCallingAgent):
         )
 
     def _build_tools(self):
-        ctx = self.ctx
+        workflow_state = self.workflow_state
         logger = self.logger
 
         # Tools for the sales agent
@@ -182,7 +182,7 @@ class SalesManagerAgent(ToolCallingAgent):
             Returns:
                 str: List of all items with their sale_completed attribute updated
             """
-            return execute_sale(ctx, logger)
+            return execute_sale(workflow_state, logger)
 
         @tool
         def execute_restock_tool(order_date: str) -> str:
@@ -192,7 +192,7 @@ class SalesManagerAgent(ToolCallingAgent):
             Returns:
                 str: List of restocked items in the inventory (if any)
             """
-            return execute_restock(order_date, ctx, logger)
+            return execute_restock(order_date, workflow_state, logger)
 
         @tool
         def get_financial_status_tool(order_date: str) -> str:
@@ -202,7 +202,7 @@ class SalesManagerAgent(ToolCallingAgent):
             Returns:
                 str: Financial report containing the cash and the inventory status
             """
-            return get_financial_status(order_date, ctx, logger)
+            return get_financial_status(order_date, workflow_state, logger)
 
         return [execute_sale_tool, execute_restock_tool, get_financial_status_tool]
 
@@ -210,15 +210,15 @@ class SalesManagerAgent(ToolCallingAgent):
 class Orchestrator(ToolCallingAgent):
     """Orchestrator that coordinates the activities of all agents"""
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
         self.model = model
-        self.ctx = ctx
+        self.workflow_state = workflow_state
         self.orchestrator_logger = get_logger(self)
         # Initialize specialized agents
-        self.inventory_manager = InventoryManagerAgent(model, ctx)
-        self.order_processor = OrderProcessorAgent(model, ctx)
-        self.quote_manager = QuoteManagerAgent(model, ctx)
-        self.sales_manager = SalesManagerAgent(model, ctx)
+        self.inventory_manager = InventoryManagerAgent(model, workflow_state)
+        self.order_processor = OrderProcessorAgent(model, workflow_state)
+        self.quote_manager = QuoteManagerAgent(model, workflow_state)
+        self.sales_manager = SalesManagerAgent(model, workflow_state)
         self.order_processor_resp = None
         self.inventory_manager_resp = None
         self.quote_manager_resp = None
@@ -295,7 +295,7 @@ class Orchestrator(ToolCallingAgent):
         @tool
         def get_order_state() -> str:
             """Return the current structured state of all requested order lines"""
-            return return_full_state(self.ctx.requested_items)
+            return return_full_state(self.workflow_state.requested_items)
 
         super().__init__(
             model=model,
@@ -357,6 +357,6 @@ class Orchestrator(ToolCallingAgent):
         self.order_processor_resp = None
         self.inventory_manager_resp = None
         self.quote_manager_resp = None
-        self.ctx.financial_report = None
-        self.ctx.sold_order_line_ids.clear()
-        self.ctx.requested_items = []
+        self.workflow_state.financial_report = None
+        self.workflow_state.sold_order_line_ids.clear()
+        self.workflow_state.requested_items = []

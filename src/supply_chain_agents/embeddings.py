@@ -6,6 +6,7 @@ import numpy as np
 @lru_cache(maxsize=1)
 def _get_embedder():
     from sentence_transformers import SentenceTransformer
+
     # Create embedder for name matching
     embedder = SentenceTransformer("BAAI/bge-m3")
     return embedder

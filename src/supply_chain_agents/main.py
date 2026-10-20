@@ -15,13 +15,13 @@ from supply_chain_agents.config import (
     product_prices,
 )
 from supply_chain_agents.config_logging import configure_logging, get_logger
-from supply_chain_agents.context import Context
 from supply_chain_agents.embeddings import embed
 from supply_chain_agents.utils import (
     generate_financial_report,
     get_min_stock_levels,
     init_database,
 )
+from supply_chain_agents.workflow_state import WorkflowState
 
 logger = get_logger(__name__)
 
@@ -29,8 +29,8 @@ logger = get_logger(__name__)
 # Run the test scenarios
 def run_test_scenarios():
     """Run all sample customer requests through the multi-agent workflow"""
-    # Initialize shared context and Logger
-    context = Context(
+    # Initialize the workflow state
+    workflow_state = WorkflowState(
         db_engine=db_engine,
         catalog_items=catalog_items,
         product_prices=product_prices,
@@ -38,8 +38,10 @@ def run_test_scenarios():
     )
 
     # Initializing Database
-    init_database(db_engine=context.db_engine)
-    context.min_stock_levels = get_min_stock_levels(db_engine=context.db_engine)
+    init_database(db_engine=workflow_state.db_engine)
+    workflow_state.min_stock_levels = get_min_stock_levels(
+        db_engine=workflow_state.db_engine
+    )
     try:
         quote_requests_sample = pd.read_csv(
             os.path.join(DATA_DIR, "quote_requests_sample.csv")
@@ -72,7 +74,7 @@ def run_test_scenarios():
     )
 
     # Create the orchestrator
-    orchestrator = Orchestrator(model, context)
+    orchestrator = Orchestrator(model, workflow_state)
 
     results = []
 
@@ -91,9 +93,9 @@ def run_test_scenarios():
         response = orchestrator.process_customer_order(request_with_date)
 
         # Update state with the orchestrator's response
-        if context.financial_report:
-            current_cash = context.financial_report.cash_balance
-            current_inventory = context.financial_report.inventory_value
+        if workflow_state.financial_report:
+            current_cash = workflow_state.financial_report.cash_balance
+            current_inventory = workflow_state.financial_report.inventory_value
 
         logger.info("RESPONSE: %s", response)
         logger.info("Updated Cash: $%.2f", current_cash)
