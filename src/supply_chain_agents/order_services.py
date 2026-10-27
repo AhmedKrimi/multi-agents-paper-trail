@@ -4,6 +4,7 @@ import numpy as np
 from pydantic import ValidationError
 
 from supply_chain_agents.config import MATCHING_THRESHOLD
+from supply_chain_agents.config_logging import get_logger
 from supply_chain_agents.embeddings import embed
 from supply_chain_agents.models import FinancialReport, RequestedItem
 from supply_chain_agents.utils import (
@@ -28,7 +29,7 @@ def add_order_item(
     order_date: str,
     delivery_date: str,
     workflow_state: WorkflowState,
-    logger: Logger | None,
+    logger: Logger | None = None,
 ) -> str:
     """Add an order item to the requested items in the shared workflow state
 
@@ -42,6 +43,7 @@ def add_order_item(
     Returns:
         str: JSON string representing the new RequestedItem with its extracted item_description, requested_quantity, order_date and delivery_date
     """
+    logger = logger if logger is not None else get_logger(__name__)
 
     item = RequestedItem(
         item_description=item_description,
@@ -51,21 +53,22 @@ def add_order_item(
     )
     workflow_state.requested_items.append(item)
 
-    if logger:
-        logger.info(
-            "item description: %s, requested quantity: %s"
-            " order date: %s and delivery date: %s"
-            " has been extracted from the customer order",
-            item_description,
-            requested_quantity,
-            order_date,
-            delivery_date,
-        )
+    logger.info(
+        "item description: %s, requested quantity: %s"
+        " order date: %s and delivery date: %s"
+        " has been extracted from the customer order",
+        item_description,
+        requested_quantity,
+        order_date,
+        delivery_date,
+    )
 
     return item.model_dump_json()
 
 
-def assign_inventory_name(workflow_state: WorkflowState, logger: Logger) -> str:
+def assign_inventory_name(
+    workflow_state: WorkflowState, logger: Logger | None = None
+) -> str:
     """Match each requested item to a valid catalog item.
     Args:
         workflow_state (WorkflowState): Shared order state and database dependencies.
@@ -73,6 +76,7 @@ def assign_inventory_name(workflow_state: WorkflowState, logger: Logger) -> str:
     Returns:
         str: List of the RequestedItems with their updated matched_catalog_item closest to item_description
     """
+    logger = logger if logger is not None else get_logger(__name__)
 
     for item in workflow_state.requested_items:
         query_vec = embed(item.item_description)
@@ -129,7 +133,9 @@ def check_stock_inventory(workflow_state: WorkflowState) -> str:
     return return_full_state(items=workflow_state.requested_items)
 
 
-def check_delivery_timeline(workflow_state: WorkflowState, logger: Logger) -> str:
+def check_delivery_timeline(
+    workflow_state: WorkflowState, logger: Logger | None = None
+) -> str:
     """Check if the quantity of an item can be delivered by a supplier before the delivery_date
     Args:
         workflow_state (WorkflowState): Shared order state and database dependencies.
@@ -137,6 +143,7 @@ def check_delivery_timeline(workflow_state: WorkflowState, logger: Logger) -> st
     Returns:
         str: list of all requested items (with supplier_order_feasible/supplier_delivery_date updated)
     """
+    logger = logger if logger is not None else get_logger(__name__)
     for item in workflow_state.requested_items:
         # Check if the item needs to be reordered from the supplier
         if item.matched_catalog_item is None:
@@ -157,13 +164,16 @@ def check_delivery_timeline(workflow_state: WorkflowState, logger: Logger) -> st
                     str(supplier_delivery_date),
                 )
                 item.supplier_order_feasible = False
+                item.supplier_delivery_date = None
             else:
                 item.supplier_order_feasible = True
                 item.supplier_delivery_date = _parse_date(supplier_delivery_date)
     return return_full_state(items=workflow_state.requested_items)
 
 
-def calculate_discount_rate(workflow_state: WorkflowState, logger: Logger) -> str:
+def calculate_discount_rate(
+    workflow_state: WorkflowState, logger: Logger | None = None
+) -> str:
     """Calculate and apply a bulk discount to the customer order
     Args:
         workflow_state (WorkflowState): Shared order state and database dependencies.
@@ -171,6 +181,7 @@ def calculate_discount_rate(workflow_state: WorkflowState, logger: Logger) -> st
     Returns:
         str: List of requested items with the calculated discount_rate
     """
+    logger = logger if logger is not None else get_logger(__name__)
     discount_rate = 0.0
     quote_history = search_quote_history(
         workflow_state.db_engine,
@@ -204,7 +215,7 @@ def calculate_discount_rate(workflow_state: WorkflowState, logger: Logger) -> st
     return return_full_state(items=workflow_state.requested_items)
 
 
-def execute_sale(workflow_state: WorkflowState, logger: Logger) -> str:
+def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) -> str:
     """Execute a sale transaction for each requested item
     Args:
         workflow_state (WorkflowState): Shared order state and database dependencies.
@@ -212,6 +223,7 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger) -> str:
     Returns:
         str: List of all items with their sale_completed attribute updated
     """
+    logger = logger if logger is not None else get_logger(__name__)
     for item in workflow_state.requested_items:
         if item.matched_catalog_item is None:
             continue
@@ -322,7 +334,7 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger) -> str:
 
 
 def execute_restock(
-    order_date: str, workflow_state: WorkflowState, logger: Logger
+    order_date: str, workflow_state: WorkflowState, logger: Logger | None = None
 ) -> str:
     """Restock inventory items below their minimum stock levels
     Args:
@@ -332,6 +344,7 @@ def execute_restock(
     Returns:
         str: List of restocked items in the inventory (if any)
     """
+    logger = logger if logger is not None else get_logger(__name__)
     restocked_items = []
     inventory_snapshot = get_all_inventory(
         db_engine=workflow_state.db_engine, as_of_date=order_date
@@ -373,7 +386,7 @@ def execute_restock(
 
 
 def get_financial_status(
-    order_date: str, workflow_state: WorkflowState, logger: Logger
+    order_date: str, workflow_state: WorkflowState, logger: Logger | None = None
 ) -> str:
     """Get the cash balance and inventory value after sales and restocking
     Args:
@@ -383,6 +396,7 @@ def get_financial_status(
     Returns:
         str: Financial report containing the cash and the inventory status
     """
+    logger = logger if logger is not None else get_logger(__name__)
     financial_report_full = generate_financial_report(
         workflow_state.db_engine, order_date
     )

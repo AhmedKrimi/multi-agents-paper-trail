@@ -190,6 +190,8 @@ This will:
 
 The first test suite contains 14 end-to-end tests in `tests/test_e2e.py`, using sample customer requests from `data/quote_requests_sample.csv`. These tests exercise the full agent workflow and assert structured order-line state, including catalog matches, quantities, fulfillment decisions, supplier feasibility, sale completion, and financial-report presence where applicable.
 
+`tests/test_order_services.py` contains focused tests for order-service validation, catalog matching, stock and delivery checks, sales, restocking, and financial reporting. Run them with `python -m pytest tests/test_order_services.py`.
+
 ### Scenarios covered
 
 | Area | Scenarios |
