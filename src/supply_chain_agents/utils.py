@@ -266,13 +266,17 @@ def get_cash_balance(db_engine: Engine, as_of_date: str | date) -> float:
 
 
 def reorder_supply(
-    inventory_name: str, quantity: int, order_date: date, workflow_state: WorkflowState
+    inventory_name: str,
+    quantity: int,
+    arrival_date: date,
+    workflow_state: WorkflowState,
 ) -> bool:
-    """Order item from the supplier
+    """Order item from the supplier.
+
     Args:
         inventory_name (str): The name of the item to reorder from the supplier.
         quantity (int): Number of units to reorder from the supplier.
-        order_date (date): Date of the order in ISO 8601 format.
+        arrival_date (date): Expected arrival date of the replenishment in ISO 8601 format.
         workflow_state (WorkflowState): Shared workflow state.
 
     Returns:
@@ -299,14 +303,14 @@ def reorder_supply(
     price = round(SUPPLIER_PRICE_FACTOR * unit_price * quantity, 2)
 
     try:
-        if price <= get_cash_balance(workflow_state.db_engine, order_date):
+        if price <= get_cash_balance(workflow_state.db_engine, arrival_date):
             transaction_id = create_transaction(
                 workflow_state.db_engine,
                 inventory_name,
                 transaction_type="stock_orders",
                 quantity=quantity,
                 price=price,
-                date=order_date,
+                date=arrival_date,
             )
             logger.info(
                 "Ordering %s transaction was successful - transaction ID: %s",

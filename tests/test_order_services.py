@@ -258,6 +258,7 @@ def test_execute_sale_reorders_shortage_before_selling(workflow_state, monkeypat
         can_fulfill=False,
         shortage_quantity=25,
         supplier_order_feasible=True,
+        supplier_delivery_date=date(2026, 1, 2)
     )
     workflow_state.requested_items = [item]
     stock_levels = iter([50, 75])
@@ -287,7 +288,7 @@ def test_execute_sale_reorders_shortage_before_selling(workflow_state, monkeypat
         {
             "inventory_name": "Party streamers",
             "quantity": 25,
-            "order_date": item.order_date,
+            "arrival_date": item.supplier_delivery_date,
             "workflow_state": workflow_state,
         }
     ]
@@ -368,7 +369,9 @@ def test_execute_sale_stops_when_supplier_reorder_fails(workflow_state, monkeypa
     monkeypatch.setattr(
         order_services,
         "create_transaction",
-        lambda *args, **kwargs: pytest.fail("sale must not occur after reorder failure"),
+        lambda *args, **kwargs: pytest.fail(
+            "sale must not occur after reorder failure"
+        ),
     )
 
     execute_sale(workflow_state)
@@ -379,9 +382,7 @@ def test_execute_sale_stops_when_supplier_reorder_fails(workflow_state, monkeypa
 
 
 def test_execute_sale_stops_when_stock_is_insufficient(workflow_state, monkeypatch):
-    item = _make_requested_item(
-        requested_quantity=10, matched_catalog_item="A4 paper"
-    )
+    item = _make_requested_item(requested_quantity=10, matched_catalog_item="A4 paper")
     workflow_state.requested_items = [item]
     monkeypatch.setattr(
         order_services,
@@ -426,9 +427,7 @@ def test_execute_sale_resets_state_and_reraises_transaction_error(
     assert item.order_line_id not in workflow_state.sold_order_line_ids
 
 
-def test_execute_restock_reorders_only_items_below_minimum(
-    workflow_state, monkeypatch
-):
+def test_execute_restock_reorders_only_items_below_minimum(workflow_state, monkeypatch):
     workflow_state.min_stock_levels = {
         "A4 paper": 5,
         "Construction paper": 5,
@@ -459,13 +458,13 @@ def test_execute_restock_reorders_only_items_below_minimum(
         {
             "inventory_name": "A4 paper",
             "quantity": 2,
-            "order_date": date(2026, 1, 1),
+            "arrival_date": date(2026, 1, 1),
             "workflow_state": workflow_state,
         },
         {
             "inventory_name": "Construction paper",
             "quantity": 4,
-            "order_date": date(2026, 1, 1),
+            "arrival_date": date(2026, 1, 1),
             "workflow_state": workflow_state,
         },
     ]
