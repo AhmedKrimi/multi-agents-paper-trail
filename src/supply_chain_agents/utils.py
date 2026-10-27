@@ -8,11 +8,11 @@ from pydantic import TypeAdapter
 from sqlalchemy import Engine
 from sqlalchemy.sql import text
 
-from supply_chain_agents.config import DATA_DIR, SUPPLIER_PRICE_FACTOR, embedder
+from supply_chain_agents.config import DATA_DIR, SUPPLIER_PRICE_FACTOR
 from supply_chain_agents.config_logging import get_logger
-from supply_chain_agents.context import Context
 from supply_chain_agents.inventory import PAPER_CATALOG
 from supply_chain_agents.models import FinancialReport, RequestedItem
+from supply_chain_agents.workflow_state import WorkflowState
 
 logger = get_logger(__name__)
 
@@ -266,14 +266,14 @@ def get_cash_balance(db_engine: Engine, as_of_date: str | date) -> float:
 
 
 def reorder_supply(
-    inventory_name: str, quantity: int, order_date: date, ctx: Context
+    inventory_name: str, quantity: int, order_date: date, workflow_state: WorkflowState
 ) -> bool:
     """Order item from the supplier
     Args:
         inventory_name (str): The name of the item to reorder from the supplier.
         quantity (int): Number of units to reorder from the supplier.
         order_date (date): Date of the order in ISO 8601 format.
-        ctx (Context): Shared workflow context.
+        workflow_state (WorkflowState): Shared workflow state.
 
     Returns:
         bool: True, if Transaction is OK, otherwise False
@@ -287,7 +287,7 @@ def reorder_supply(
         )
         return False
 
-    if inventory_name not in ctx.catalog_items:
+    if inventory_name not in workflow_state.catalog_items:
         logger.warning(
             "Ordering transaction from the supplier of %s has failed, %s is not valid item",
             inventory_name,
@@ -295,13 +295,13 @@ def reorder_supply(
         )
         return False
 
-    unit_price = ctx.product_prices[inventory_name]
+    unit_price = workflow_state.product_prices[inventory_name]
     price = round(SUPPLIER_PRICE_FACTOR * unit_price * quantity, 2)
 
     try:
-        if price <= get_cash_balance(ctx.db_engine, order_date):
+        if price <= get_cash_balance(workflow_state.db_engine, order_date):
             transaction_id = create_transaction(
-                ctx.db_engine,
+                workflow_state.db_engine,
                 inventory_name,
                 transaction_type="stock_orders",
                 quantity=quantity,
@@ -669,11 +669,6 @@ def return_full_state(items: list[RequestedItem]) -> str:
     """Serialize the requested item list to JSON"""
     requested_items_adapter = TypeAdapter(list[RequestedItem])
     return requested_items_adapter.dump_json(items).decode("utf-8")
-
-
-def embed(text: list[str] | str) -> np.ndarray:
-    """Generate normalized embeddings for one or more text inputs"""
-    return embedder.encode(text, normalize_embeddings=True)
 
 
 def apply_bulk_discount(requested_items: list[RequestedItem], discount: float) -> None:

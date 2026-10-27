@@ -1,33 +1,28 @@
-import numpy as np
-from pydantic import ValidationError
 from smolagents import OpenAIServerModel, ToolCallingAgent, tool
 
-from supply_chain_agents.config import MATCHING_THRESHOLD
 from supply_chain_agents.config_logging import get_logger
-from supply_chain_agents.context import Context
-from supply_chain_agents.models import FinancialReport, RequestedItem
-from supply_chain_agents.utils import (
-    _parse_date,
-    apply_bulk_discount,
-    create_transaction,
-    embed,
-    generate_financial_report,
-    get_all_inventory,
-    get_stock_level,
-    get_supplier_delivery_date,
-    reorder_supply,
-    return_full_state,
-    search_quote_history,
-    validate_model,
+from supply_chain_agents.order_services import (
+    add_order_item,
+    assign_inventory_name,
+    calculate_discount_rate,
+    check_delivery_timeline,
+    check_stock_inventory,
+    execute_restock,
+    execute_sale,
+    get_financial_status,
 )
+from supply_chain_agents.utils import (
+    return_full_state,
+)
+from supply_chain_agents.workflow_state import WorkflowState
 
 
 # Set up the different agents
 class OrderProcessorAgent(ToolCallingAgent):
     """Agent responsible for extracting information from customer requests"""
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
-        self.ctx = ctx
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
+        self.workflow_state = workflow_state
         self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
@@ -37,7 +32,7 @@ class OrderProcessorAgent(ToolCallingAgent):
         )
 
     def _build_tools(self):
-        ctx = self.ctx
+        workflow_state = self.workflow_state
         logger = self.logger
 
         @tool
@@ -47,35 +42,23 @@ class OrderProcessorAgent(ToolCallingAgent):
             order_date: str,
             delivery_date: str,
         ) -> str:
-            """Extract item info from the customer request
+            """Extract item info from the customer request and create a new RequestedItem
             Args:
                 item_description (str):  original item description extracted from the customer request
                 requested_quantity (int): requested_quantity of the item in the customer request
                 order_date (str): date of the order by the customer in <YYYY-MM-DD> format
                 delivery_date (str): delivery date expected of the item in the customer request in <YYYY-MM-DD>
             Returns:
-                str: JSON string representing the RequestedItem with their extracted item_description, requested_quantity, order_date and delivery_date
+                str: JSON string representing the new RequestedItem with its extracted item_description, requested_quantity, order_date and delivery_date
             """
-
-            item = RequestedItem(
-                item_description=item_description,
-                requested_quantity=requested_quantity,
-                order_date=_parse_date(order_date),
-                delivery_date=_parse_date(delivery_date),
-            )
-            ctx.requested_items.append(item)
-
-            logger.info(
-                "item description: %s, requested quantity: %s"
-                " order date: %s and delivery date: %s"
-                " has been extracted from the customer order",
+            return add_order_item(
                 item_description,
                 requested_quantity,
                 order_date,
                 delivery_date,
+                workflow_state,
+                logger,
             )
-
-            return item.model_dump_json()
 
         return [extract_item_description]
 
@@ -83,8 +66,8 @@ class OrderProcessorAgent(ToolCallingAgent):
 class InventoryManagerAgent(ToolCallingAgent):
     """Agent responsible for managing the inventory"""
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
-        self.ctx = ctx
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
+        self.workflow_state = workflow_state
         self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
@@ -94,111 +77,48 @@ class InventoryManagerAgent(ToolCallingAgent):
         )
 
     def _build_tools(self):
-        ctx = self.ctx
+        workflow_state = self.workflow_state
         logger = self.logger
 
         # Tools for inventory agent
         @tool
-        def assign_inventory_name() -> str:
+        def assign_inventory_name_tool() -> str:
             """Match each requested item to a valid catalog item.
 
             Returns:
                 str: List of the RequestedItems with their updated matched_catalog_item closest to item_description
             """
-
-            for item in ctx.requested_items:
-                query_vec = embed(item.item_description)
-                cos_sims = ctx.catalog_embeddings @ query_vec
-                best_idx = int(np.argmax(cos_sims))
-                matched_catalog_item = (
-                    ctx.catalog_items[best_idx]
-                    if cos_sims[best_idx] >= MATCHING_THRESHOLD
-                    else None
-                )
-                if matched_catalog_item:
-                    item.matched_catalog_item = matched_catalog_item
-                    logger.info(
-                        "Item: %s is assigned to the inventory name: %s, score: %s",
-                        item.item_description,
-                        matched_catalog_item,
-                        cos_sims[best_idx],
-                    )
-                else:
-                    logger.warning(
-                        "Item %s could not be matched to the catalog",
-                        item.item_description,
-                    )
-
-            return return_full_state(ctx.requested_items)
+            return assign_inventory_name(workflow_state, logger)
 
         @tool
-        def check_stock_inventory() -> str:
+        def check_stock_inventory_tool() -> str:
             """Check whether the current requested items are in sufficient quantity in the inventory
             Returns:
                 str: List of requested items with their status in the inventory (can_fulfill, shortage_quantity) updated
             """
 
-            for item in ctx.requested_items:
-                matched_catalog_item = item.matched_catalog_item
-                order_date = item.order_date
-                quantity = item.requested_quantity
-                if matched_catalog_item not in ctx.catalog_items:
-                    item.can_fulfill = False
-                    continue
-                current_stock = int(
-                    get_stock_level(ctx.db_engine, matched_catalog_item, order_date)[
-                        "current_stock"
-                    ].iloc[0]
-                )
-                if current_stock >= quantity:
-                    item.can_fulfill = True
-                else:
-                    item.can_fulfill = False
-                    item.shortage_quantity = quantity - current_stock
-
-            return return_full_state(items=ctx.requested_items)
+            return check_stock_inventory(workflow_state)
 
         @tool
-        def check_delivery_timeline() -> str:
+        def check_delivery_timeline_tool() -> str:
             """Check if the quantity of an item can be delivered by a supplier before the delivery_date
             Returns:
                 str: list of all requested items (with supplier_order_feasible/supplier_delivery_date updated)
             """
-            for item in ctx.requested_items:
-                # Check if the item needs to be reordered from the supplier
-                if item.matched_catalog_item is None:
-                    continue
-                if not item.can_fulfill:
-                    order_date = item.order_date
-                    delivery_date = item.delivery_date
-                    shortage_quantity = item.shortage_quantity
+            return check_delivery_timeline(workflow_state, logger)
 
-                    supplier_delivery_date = get_supplier_delivery_date(
-                        input_date_str=str(order_date), quantity=shortage_quantity
-                    )
-
-                    if _parse_date(supplier_delivery_date) > _parse_date(delivery_date):
-                        logger.warning(
-                            "Item %s cannot be delivered on time from the supplier (supplier delivery date: %s)",
-                            item.item_description,
-                            str(supplier_delivery_date),
-                        )
-                        item.supplier_order_feasible = False
-                    else:
-                        item.supplier_order_feasible = True
-                        item.supplier_delivery_date = _parse_date(
-                            supplier_delivery_date
-                        )
-            return return_full_state(items=ctx.requested_items)
-
-        return [assign_inventory_name, check_stock_inventory, check_delivery_timeline]
+        return [
+            assign_inventory_name_tool,
+            check_stock_inventory_tool,
+            check_delivery_timeline_tool,
+        ]
 
 
 class QuoteManagerAgent(ToolCallingAgent):
     """Agent responsible for calculating item discounts and pricing"""
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
-        self.ctx = ctx
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
+        self.workflow_state = workflow_state
         self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
@@ -208,58 +128,26 @@ class QuoteManagerAgent(ToolCallingAgent):
         )
 
     def _build_tools(self):
-        ctx = self.ctx
+        workflow_state = self.workflow_state
         logger = self.logger
 
         @tool
-        def calculate_discount_rate() -> str:
+        def calculate_discount_rate_tool() -> str:
             """Calculate and apply a bulk discount to the customer order
 
             Returns:
                 str: List of requested items with the calculated discount_rate
             """
-            discount_rate = 0.0
-            quote_history = search_quote_history(
-                ctx.db_engine,
-                [item.item_description for item in ctx.requested_items],
-                limit=1,
-            )
+            return calculate_discount_rate(workflow_state, logger)
 
-            if quote_history:
-                order_size = quote_history[0]["order_size"]
-                if order_size == "large":
-                    discount_rate = 0.2
-                elif order_size == "medium":
-                    discount_rate = 0.1
-                else:
-                    discount_rate = 0.0
-            else:
-                logger.debug(
-                    "No history found for this request, calculating the order_size"
-                )
-
-                total_quantity = sum(
-                    item.requested_quantity for item in ctx.requested_items
-                )
-                if total_quantity >= 1000:  # Large
-                    discount_rate = 0.2
-                elif total_quantity >= 100:  # Medium
-                    discount_rate = 0.1
-                else:
-                    discount_rate = 0.0  # Small
-            # Apply the calculated bulk discount to all the items
-            apply_bulk_discount(ctx.requested_items, discount=discount_rate)
-
-            return return_full_state(items=ctx.requested_items)
-
-        return [calculate_discount_rate]
+        return [calculate_discount_rate_tool]
 
 
 class SalesManagerAgent(ToolCallingAgent):
     "Agent responsible for executing orders, and performing after-sales operations, including restocking and financial reporting"
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
-        self.ctx = ctx
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
+        self.workflow_state = workflow_state
         self.logger = get_logger(self)
         super().__init__(
             tools=self._build_tools(),
@@ -271,208 +159,53 @@ class SalesManagerAgent(ToolCallingAgent):
         )
 
     def _build_tools(self):
-        ctx = self.ctx
+        workflow_state = self.workflow_state
         logger = self.logger
 
         # Tools for the sales agent
         @tool
-        def execute_sale() -> str:
+        def execute_sale_tool() -> str:
             """Execute a sale transaction for each requested item
             Returns:
                 str: List of all items with their sale_completed attribute updated
             """
-            for item in ctx.requested_items:
-                if item.matched_catalog_item is None:
-                    continue
-                item_id = item.order_line_id
-                matched_catalog_item = item.matched_catalog_item
-                quantity = item.requested_quantity
-                order_date = item.order_date
-                supplier_order_feasible = item.supplier_order_feasible
-                shortage_quantity = item.shortage_quantity
-                discount_rate = item.discount_rate
-
-                if item_id in ctx.sold_order_line_ids:
-                    logger.warning(
-                        "%s selling transaction has already executed, skip to the next item",
-                        item_id,
-                    )
-                    continue
-
-                if matched_catalog_item not in ctx.catalog_items:
-                    logger.error("Transaction for %s has failed", matched_catalog_item)
-                    continue
-
-                transaction_date = order_date
-
-                # Order the missing quantity from the supplier first
-                if supplier_order_feasible:
-                    actual_shortage_quantity = quantity - int(
-                        get_stock_level(
-                            ctx.db_engine, matched_catalog_item, order_date
-                        )["current_stock"].iloc[0]
-                    )
-                    if actual_shortage_quantity != shortage_quantity:
-                        logger.error(
-                            "Mismatch between actual short by %s and the short by calculated by the inventory manager: %s, sell aborted",
-                            actual_shortage_quantity,
-                            shortage_quantity,
-                        )
-                        item.sale_completed = False
-                        continue
-                    supplier_order_succeeded = reorder_supply(
-                        inventory_name=matched_catalog_item,
-                        quantity=shortage_quantity,
-                        order_date=transaction_date,
-                        ctx=ctx,
-                    )
-                    if not supplier_order_succeeded:
-                        logger.warning(
-                            "Ordering %s with %s has failed!",
-                            matched_catalog_item,
-                            shortage_quantity,
-                        )
-                        item.sale_completed = False
-                        item.can_fulfill = False
-                        continue
-
-                # Check first if the quantity is available before the delivery date
-                current_stock = int(
-                    get_stock_level(
-                        ctx.db_engine, matched_catalog_item, transaction_date
-                    )["current_stock"].iloc[0]
-                )
-                if current_stock < quantity:
-                    logger.warning(
-                        "Selling %s failed! quantity in stock: %s"
-                        " is not enough to cover requested quantity: %s",
-                        matched_catalog_item,
-                        current_stock,
-                        quantity,
-                    )
-                    item.sale_completed = False
-                    item.can_fulfill = False
-                    continue
-                else:
-                    item.shortage_quantity = 0
-                    item.can_fulfill = True
-
-                # Execute the sale
-                if item.can_fulfill:
-                    unit_price = ctx.product_prices[matched_catalog_item]
-                    price = round((1 - discount_rate) * unit_price * quantity, 2)
-
-                    try:
-                        transaction_id = create_transaction(
-                            ctx.db_engine,
-                            matched_catalog_item,
-                            transaction_type="sales",
-                            quantity=quantity,
-                            price=price,
-                            date=transaction_date,
-                        )
-                        ctx.sold_order_line_ids.add(item_id)
-                        item.sale_completed = True
-                        logger.info(
-                            "Selling %s transaction was successful - price: %s - transaction ID: %s",
-                            matched_catalog_item,
-                            price,
-                            transaction_id,
-                        )
-                    except Exception:
-                        item.sale_completed = False
-                        item.can_fulfill = False
-                        logger.exception(
-                            "Selling %s transaction has failed", matched_catalog_item
-                        )
-                        raise
-
-            return return_full_state(items=ctx.requested_items)
+            return execute_sale(workflow_state, logger)
 
         @tool
-        def execute_restock(order_date: str) -> str:
+        def execute_restock_tool(order_date: str) -> str:
             """Restock inventory items below their minimum stock levels
             Args:
                 order_date (str): order date of the request in <YYYY-MM-DD> format
             Returns:
                 str: List of restocked items in the inventory (if any)
             """
-            restocked_items = []
-            inventory_snapshot = get_all_inventory(
-                db_engine=ctx.db_engine, as_of_date=order_date
-            )
-            for item, stock in inventory_snapshot.items():
-                if item not in ctx.min_stock_levels:
-                    logger.warning(
-                        "No minimum stock level configured for %s; skipping restock",
-                        item,
-                    )
-                    continue
-                min_stock_level = ctx.min_stock_levels[item]
-                if stock < min_stock_level:
-                    restock_quantity = min_stock_level - stock
-                    logger.info(
-                        "item: %s, is short in stock (only: %s left), restocking with quantity: %s",
-                        item,
-                        stock,
-                        restock_quantity,
-                    )
-                    restock_succeeded = reorder_supply(
-                        inventory_name=item,
-                        quantity=restock_quantity,
-                        order_date=_parse_date(order_date),
-                        ctx=ctx,
-                    )
-                    if restock_succeeded:
-                        restocked_items.append(item)
-                    else:
-                        logger.warning(
-                            "Supplier reorder failed for %s, quantity: %s",
-                            item,
-                            restock_quantity,
-                        )
-            if restocked_items:
-                restocked_items_str = ", ".join(restocked_items)
-                return f"Following items got restocked: {restocked_items_str}"
-            return "All items are available - no restocking performed"
+            return execute_restock(order_date, workflow_state, logger)
 
         @tool
-        def get_financial_status(order_date: str) -> str:
+        def get_financial_status_tool(order_date: str) -> str:
             """Get the cash balance and inventory value after sales and restocking
             Args:
                 order_date (str): order date of the request in <YYYY-MM-DD> format
             Returns:
                 str: Financial report containing the cash and the inventory status
             """
-            financial_report_full = generate_financial_report(ctx.db_engine, order_date)
-            keys = ["as_of_date", "cash_balance", "inventory_value"]
-            financial_report_short = {k: financial_report_full[k] for k in keys}
-            try:
-                financial_report_model = validate_model(
-                    FinancialReport, financial_report_short
-                )
-                ctx.financial_report = financial_report_model
-                return ctx.financial_report.model_dump_json()
-            except ValidationError as e:
-                msg = f"Validation error: {e} - Financial report generation failed"
-                logger.error(msg)
-                return msg
+            return get_financial_status(order_date, workflow_state, logger)
 
-        return [execute_sale, execute_restock, get_financial_status]
+        return [execute_sale_tool, execute_restock_tool, get_financial_status_tool]
 
 
 class Orchestrator(ToolCallingAgent):
     """Orchestrator that coordinates the activities of all agents"""
 
-    def __init__(self, model: OpenAIServerModel, ctx: Context):
+    def __init__(self, model: OpenAIServerModel, workflow_state: WorkflowState):
         self.model = model
-        self.ctx = ctx
+        self.workflow_state = workflow_state
         self.orchestrator_logger = get_logger(self)
         # Initialize specialized agents
-        self.inventory_manager = InventoryManagerAgent(model, ctx)
-        self.order_processor = OrderProcessorAgent(model, ctx)
-        self.quote_manager = QuoteManagerAgent(model, ctx)
-        self.sales_manager = SalesManagerAgent(model, ctx)
+        self.inventory_manager = InventoryManagerAgent(model, workflow_state)
+        self.order_processor = OrderProcessorAgent(model, workflow_state)
+        self.quote_manager = QuoteManagerAgent(model, workflow_state)
+        self.sales_manager = SalesManagerAgent(model, workflow_state)
         self.order_processor_resp = None
         self.inventory_manager_resp = None
         self.quote_manager_resp = None
@@ -549,7 +282,7 @@ class Orchestrator(ToolCallingAgent):
         @tool
         def get_order_state() -> str:
             """Return the current structured state of all requested order lines"""
-            return return_full_state(self.ctx.requested_items)
+            return return_full_state(self.workflow_state.requested_items)
 
         super().__init__(
             model=model,
@@ -611,6 +344,6 @@ class Orchestrator(ToolCallingAgent):
         self.order_processor_resp = None
         self.inventory_manager_resp = None
         self.quote_manager_resp = None
-        self.ctx.financial_report = None
-        self.ctx.sold_order_line_ids.clear()
-        self.ctx.requested_items = []
+        self.workflow_state.financial_report = None
+        self.workflow_state.sold_order_line_ids.clear()
+        self.workflow_state.requested_items = []

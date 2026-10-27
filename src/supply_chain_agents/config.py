@@ -1,7 +1,6 @@
 import os
 from pathlib import Path
 
-from sentence_transformers import SentenceTransformer
 from sqlalchemy import create_engine
 
 from supply_chain_agents.inventory import PAPER_CATALOG
@@ -26,8 +25,6 @@ catalog_items = [paper["inventory_name"] for paper in PAPER_CATALOG]
 product_prices = {
     paper["inventory_name"]: paper["unit_price"] for paper in PAPER_CATALOG
 }
-# Create embedder for name matching
-embedder = SentenceTransformer("BAAI/bge-m3")
 
 # Workflow configuration
 MATCHING_THRESHOLD = 0.7
