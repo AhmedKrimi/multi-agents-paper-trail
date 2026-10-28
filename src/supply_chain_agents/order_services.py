@@ -167,8 +167,7 @@ def check_delivery_timeline(
                 item.supplier_delivery_date = None
             else:
                 item.supplier_order_feasible = True
-                item.supplier_delivery_date = _parse_date(
-                    supplier_delivery_date)
+                item.supplier_delivery_date = _parse_date(supplier_delivery_date)
     return return_full_state(items=workflow_state.requested_items)
 
 
@@ -199,8 +198,7 @@ def calculate_discount_rate(
         else:
             discount_rate = 0.0
     else:
-        logger.debug(
-            "No history found for this request, calculating the order_size")
+        logger.debug("No history found for this request, calculating the order_size")
 
         total_quantity = sum(
             item.requested_quantity for item in workflow_state.requested_items
@@ -237,7 +235,6 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) ->
         shortage_quantity = item.shortage_quantity
         supplier_delivery_date = item.supplier_delivery_date
         discount_rate = item.discount_rate
-        delivery_date = item.delivery_date
 
         if item_id in workflow_state.sold_order_line_ids:
             logger.warning(
@@ -251,9 +248,7 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) ->
             continue
 
         transaction_date = (
-            supplier_delivery_date
-            if supplier_order_feasible is True
-            else order_date
+            supplier_delivery_date if supplier_order_feasible is True else order_date
         )
 
         # Order the missing quantity from the supplier first
@@ -289,9 +284,9 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) ->
 
         # Check first if the quantity is available before the delivery date
         current_stock = int(
-            get_stock_level(workflow_state.db_engine, matched_catalog_item, transaction_date)[
-                "current_stock"
-            ].iloc[0]
+            get_stock_level(
+                workflow_state.db_engine, matched_catalog_item, transaction_date
+            )["current_stock"].iloc[0]
         )
         if current_stock < quantity:
             logger.warning(
@@ -374,7 +369,8 @@ def execute_restock(
                 restock_quantity,
             )
             supplier_delivery_date = get_supplier_delivery_date(
-                order_date, restock_quantity)
+                order_date, restock_quantity
+            )
             restock_succeeded = reorder_supply(
                 inventory_name=item,
                 quantity=restock_quantity,
@@ -413,8 +409,7 @@ def get_financial_status(
     keys = ["as_of_date", "cash_balance", "inventory_value"]
     financial_report_short = {k: financial_report_full[k] for k in keys}
     try:
-        financial_report_model = validate_model(
-            FinancialReport, financial_report_short)
+        financial_report_model = validate_model(FinancialReport, financial_report_short)
         workflow_state.financial_report = financial_report_model
         return workflow_state.financial_report.model_dump_json()
     except ValidationError as e:

@@ -258,7 +258,7 @@ def test_execute_sale_reorders_shortage_before_selling(workflow_state, monkeypat
         can_fulfill=False,
         shortage_quantity=25,
         supplier_order_feasible=True,
-        supplier_delivery_date=date(2026, 1, 2)
+        supplier_delivery_date=date(2026, 1, 2),
     )
     workflow_state.requested_items = [item]
     stock_levels = iter([50, 75])
@@ -425,6 +425,68 @@ def test_execute_sale_resets_state_and_reraises_transaction_error(
     assert item.sale_completed is False
     assert item.can_fulfill is False
     assert item.order_line_id not in workflow_state.sold_order_line_ids
+
+
+def test_supplier_stock_is_unavailable_before_arrival(workflow_state, monkeypatch):
+    from sqlalchemy import create_engine
+
+    from supply_chain_agents import utils
+
+    engine = create_engine("sqlite:///:memory:")
+    monkeypatch.setattr(workflow_state, "db_engine", engine)
+    monkeypatch.setattr(utils, "get_cash_balance", lambda *args: 1000.0)
+
+    # Start with five units on hand.
+    pd.DataFrame(
+        [
+            {
+                "inventory_name": "A4 paper",
+                "transaction_type": "stock_orders",
+                "units": 5,
+                "price": 0.25,
+                "transaction_date": "2026-01-01",
+            }
+        ]
+    ).to_sql("transactions", engine, index=False)
+
+    try:
+        assert utils.reorder_supply(
+            inventory_name="A4 paper",
+            quantity=20,
+            arrival_date=date(2026, 1, 5),
+            workflow_state=workflow_state,
+        )
+
+        def stock_on(day):
+            return utils.get_stock_level(engine, "A4 paper", day)["current_stock"].iloc[
+                0
+            ]
+
+        assert stock_on(date(2026, 1, 4)) == 5
+        assert stock_on(date(2026, 1, 5)) == 25
+
+        item = _make_requested_item(
+            matched_catalog_item="A4 paper",
+            requested_quantity=10,
+            order_date=date(2026, 1, 4),
+            delivery_date=date(2026, 1, 15),
+        )
+        workflow_state.requested_items = [item]
+
+        # The sale must fail before arrival
+        execute_sale(workflow_state)
+        assert item.sale_completed is False
+        assert stock_on(date(2026, 1, 4)) == 5
+        assert stock_on(date(2026, 1, 5)) == 25
+
+        # The sale can succeed on arrival date
+        item.order_date = date(2026, 1, 5)
+        execute_sale(workflow_state)
+        assert item.sale_completed is True
+        assert stock_on(date(2026, 1, 4)) == 5
+        assert stock_on(date(2026, 1, 5)) == 15
+    finally:
+        engine.dispose()
 
 
 def test_execute_restock_reorders_only_items_below_minimum(workflow_state, monkeypatch):
