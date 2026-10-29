@@ -237,9 +237,9 @@ class Orchestrator(ToolCallingAgent):
                 return "Order was not processed yet, call get_order_details first"
 
             self.inventory_manager_resp = self.inventory_manager.run("""
-             1. call assign_inventory_name
-             2. call check_stock_inventory
-             3. call check_delivery_timeline
+             1. call assign_inventory_name_tool
+             2. call check_stock_inventory_tool
+             3. call check_delivery_timeline_tool
              4. call final_answer: the status of each requested item checked by the inventory manager
             """)
             return self.inventory_manager_resp
@@ -254,7 +254,7 @@ class Orchestrator(ToolCallingAgent):
                 return "Items are not checked yet by the inventory! call manage_inventory first"
 
             self.quote_manager_resp = self.quote_manager.run("""
-            1. call calculate_discount_rate
+            1. call calculate_discount_rate_tool
             2. call final_answer: the discount_rate of each item requested by the customer
             """)
             return self.quote_manager_resp
@@ -271,9 +271,9 @@ class Orchestrator(ToolCallingAgent):
                 return "No Quote has been prepared yet! call prepare_quote first"
 
             return self.sales_manager.run(f"""request_date: {request_date}
-            1. call execute_sale
-            2. call execute_restock with order_date from {request_date}.
-            3. call get_financial_status with {request_date}.
+            1. call execute_sale_tool
+            2. call execute_restock_tool with order_date from {request_date}.
+            3. call get_financial_status_tool with {request_date}.
             4. call final_answer:
                 - status of the sale: which items have been sold and which ones got rejected
                 - financial report (cash, and inventory status)
