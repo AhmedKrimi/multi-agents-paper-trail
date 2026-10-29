@@ -17,7 +17,6 @@ from supply_chain_agents.utils import (
     get_supplier_delivery_date,
     reorder_supply,
     return_full_state,
-    search_quote_history,
     validate_model,
 )
 from supply_chain_agents.workflow_state import WorkflowState
@@ -183,32 +182,18 @@ def calculate_discount_rate(
     """
     logger = logger if logger is not None else get_logger(__name__)
     discount_rate = 0.0
-    quote_history = search_quote_history(
-        workflow_state.db_engine,
-        [item.item_description for item in workflow_state.requested_items],
-        limit=1,
+    total_price = sum(
+        item.requested_quantity
+        * workflow_state.product_prices[item.matched_catalog_item]
+        for item in workflow_state.requested_items
+        if item.can_fulfill or item.supplier_order_feasible
     )
-
-    if quote_history:
-        order_size = quote_history[0]["order_size"]
-        if order_size == "large":
-            discount_rate = 0.2
-        elif order_size == "medium":
-            discount_rate = 0.1
-        else:
-            discount_rate = 0.0
+    if total_price >= 100:  # Large
+        discount_rate = 0.2
+    elif total_price >= 30:  # Medium
+        discount_rate = 0.1
     else:
-        logger.debug("No history found for this request, calculating the order_size")
-
-        total_quantity = sum(
-            item.requested_quantity for item in workflow_state.requested_items
-        )
-        if total_quantity >= 1000:  # Large
-            discount_rate = 0.2
-        elif total_quantity >= 100:  # Medium
-            discount_rate = 0.1
-        else:
-            discount_rate = 0.0  # Small
+        discount_rate = 0.0  # Small
     # Apply the calculated bulk discount to all the items
     apply_bulk_discount(workflow_state.requested_items, discount=discount_rate)
 

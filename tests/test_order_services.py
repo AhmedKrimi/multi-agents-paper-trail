@@ -17,6 +17,7 @@ from supply_chain_agents.models import RequestedItem
 from supply_chain_agents.order_services import (
     add_order_item,
     assign_inventory_name,
+    calculate_discount_rate,
     check_delivery_timeline,
     check_stock_inventory,
     execute_restock,
@@ -208,6 +209,49 @@ def test_check_delivery_timeline(workflow_state):
     check_delivery_timeline(workflow_state=workflow_state)
     assert item.supplier_order_feasible is False
     assert item.supplier_delivery_date is None
+
+
+def test_calculate_discount_rate_no_discount(workflow_state):
+    item = _make_requested_item(
+        requested_quantity=100, matched_catalog_item="A4 paper", can_fulfill=True
+    )
+    workflow_state.requested_items.append(item)
+    calculate_discount_rate(workflow_state=workflow_state)
+    assert item.discount_rate == 0.0
+
+
+def test_calculate_discount_rate_medium_discount(workflow_state):
+    item = _make_requested_item(
+        requested_quantity=600, matched_catalog_item="A4 paper", can_fulfill=True
+    )
+    workflow_state.requested_items.append(item)
+    calculate_discount_rate(workflow_state=workflow_state)
+    assert item.discount_rate == 0.1
+
+
+def test_calculate_discount_rate_large_discount(workflow_state):
+    item = _make_requested_item(
+        requested_quantity=2000, matched_catalog_item="A4 paper", can_fulfill=True
+    )
+    workflow_state.requested_items.append(item)
+    calculate_discount_rate(workflow_state=workflow_state)
+    assert item.discount_rate == 0.2
+
+
+def test_calculate_discount_rate_no_discount_despite_large_invalid_item(workflow_state):
+    item_1 = _make_requested_item(
+        requested_quantity=10000000,
+        matched_catalog_item="Notepads",
+        can_fulfill=False,
+        supplier_order_feasible=False,
+    )
+    item_2 = _make_requested_item(
+        requested_quantity=10, matched_catalog_item="A4 paper", can_fulfill=True
+    )
+    workflow_state.requested_items = [item_1, item_2]
+    calculate_discount_rate(workflow_state=workflow_state)
+    assert item_1.discount_rate == 0.0
+    assert item_2.discount_rate == 0.0
 
 
 def test_execute_sale_completes_sale_and_applies_discount(workflow_state, monkeypatch):

@@ -402,69 +402,6 @@ def generate_financial_report(db_engine: Engine, as_of_date: str | date) -> dict
     }
 
 
-def search_quote_history(
-    db_engine: Engine, search_terms: list[str], limit: int = 5
-) -> list[dict]:
-    """
-    Retrieve a list of historical quotes that match all of the provided search terms.
-
-    The function searches both the original customer request (from `quote_requests`) and
-    the explanation for the quote (from `quotes`) for each keyword. Results are sorted by
-    most recent order date and limited by the `limit` parameter.
-
-    Args:
-        db_engine (Engine): Database engine
-        search_terms (List[str]): List of terms to match against customer requests and explanations.
-        limit (int, optional): Maximum number of quote records to return. Default is 5.
-
-    Returns:
-        List[Dict]: A list of matching quotes, each represented as a dictionary with fields:
-            - original_request
-            - total_amount
-            - quote_explanation
-            - job_type
-            - order_size
-            - event_type
-            - order_date
-    """
-    conditions = []
-    params = {}
-
-    # Build SQL WHERE clause using LIKE filters for each search term
-    for i, term in enumerate(search_terms):
-        param_name = f"term_{i}"
-        conditions.append(
-            f"(LOWER(qr.response) LIKE :{param_name} OR "
-            f"LOWER(q.quote_explanation) LIKE :{param_name})"
-        )
-        params[param_name] = f"%{term.lower()}%"
-
-    # Combine conditions; fallback to always-true if no terms provided
-    where_clause = " AND ".join(conditions) if conditions else "1=1"
-
-    # Final SQL query to join quotes with quote_requests
-    query = f"""
-        SELECT
-            qr.response AS original_request,
-            q.total_amount,
-            q.quote_explanation,
-            q.job_type,
-            q.order_size,
-            q.event_type,
-            q.order_date
-        FROM quotes q
-        JOIN quote_requests qr ON q.request_id = qr.id
-        WHERE {where_clause}
-        ORDER BY q.order_date DESC
-        LIMIT {limit}
-    """
-
-    # Execute parameterized query
-    with db_engine.connect() as conn:
-        result = conn.execute(text(query), params)
-        return [dict(row._mapping) for row in result]
-
-
 def init_database(db_engine: Engine, seed: int = 137) -> Engine:
     """
     Set up the Munder Difflin database with all required tables and initial records.
