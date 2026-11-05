@@ -17,6 +17,7 @@ from supply_chain_agents.models import RequestedItem
 from supply_chain_agents.order_services import (
     add_order_item,
     assign_inventory_name,
+    calculate_discount_rate,
     check_delivery_timeline,
     check_stock_inventory,
     execute_restock,
@@ -189,6 +190,34 @@ def test_check_stock_inventory(workflow_state):
     assert item_2.shortage_quantity == 283
 
 
+def test_check_stock_inventory_allocates_shared_stock_across_order_lines(
+    workflow_state, monkeypatch
+):
+    item_1 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=70,
+    )
+    item_2 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=70,
+    )
+    workflow_state.requested_items = [item_1, item_2]
+
+    monkeypatch.setattr(
+        order_services,
+        "get_stock_level",
+        lambda *args: pd.DataFrame({"current_stock": [100]}),
+    )
+
+    check_stock_inventory(workflow_state)
+
+    assert item_1.can_fulfill is True
+    assert item_1.shortage_quantity == 0
+
+    assert item_2.can_fulfill is False
+    assert item_2.shortage_quantity == 40
+
+
 def test_check_delivery_timeline(workflow_state):
     init_database(workflow_state.db_engine)
     item = _make_requested_item(
@@ -208,6 +237,49 @@ def test_check_delivery_timeline(workflow_state):
     check_delivery_timeline(workflow_state=workflow_state)
     assert item.supplier_order_feasible is False
     assert item.supplier_delivery_date is None
+
+
+def test_calculate_discount_rate_no_discount(workflow_state):
+    item = _make_requested_item(
+        requested_quantity=100, matched_catalog_item="A4 paper", can_fulfill=True
+    )
+    workflow_state.requested_items.append(item)
+    calculate_discount_rate(workflow_state=workflow_state)
+    assert item.discount_rate == 0.0
+
+
+def test_calculate_discount_rate_medium_discount(workflow_state):
+    item = _make_requested_item(
+        requested_quantity=600, matched_catalog_item="A4 paper", can_fulfill=True
+    )
+    workflow_state.requested_items.append(item)
+    calculate_discount_rate(workflow_state=workflow_state)
+    assert item.discount_rate == 0.1
+
+
+def test_calculate_discount_rate_large_discount(workflow_state):
+    item = _make_requested_item(
+        requested_quantity=2000, matched_catalog_item="A4 paper", can_fulfill=True
+    )
+    workflow_state.requested_items.append(item)
+    calculate_discount_rate(workflow_state=workflow_state)
+    assert item.discount_rate == 0.2
+
+
+def test_calculate_discount_rate_no_discount_despite_large_invalid_item(workflow_state):
+    item_1 = _make_requested_item(
+        requested_quantity=10000000,
+        matched_catalog_item="Notepads",
+        can_fulfill=False,
+        supplier_order_feasible=False,
+    )
+    item_2 = _make_requested_item(
+        requested_quantity=10, matched_catalog_item="A4 paper", can_fulfill=True
+    )
+    workflow_state.requested_items = [item_1, item_2]
+    calculate_discount_rate(workflow_state=workflow_state)
+    assert item_1.discount_rate == 0.0
+    assert item_2.discount_rate == 0.0
 
 
 def test_execute_sale_completes_sale_and_applies_discount(workflow_state, monkeypatch):
@@ -258,6 +330,7 @@ def test_execute_sale_reorders_shortage_before_selling(workflow_state, monkeypat
         can_fulfill=False,
         shortage_quantity=25,
         supplier_order_feasible=True,
+        supplier_delivery_date=date(2026, 1, 2),
     )
     workflow_state.requested_items = [item]
     stock_levels = iter([50, 75])
@@ -287,7 +360,7 @@ def test_execute_sale_reorders_shortage_before_selling(workflow_state, monkeypat
         {
             "inventory_name": "Party streamers",
             "quantity": 25,
-            "order_date": item.order_date,
+            "arrival_date": item.supplier_delivery_date,
             "workflow_state": workflow_state,
         }
     ]
@@ -368,7 +441,9 @@ def test_execute_sale_stops_when_supplier_reorder_fails(workflow_state, monkeypa
     monkeypatch.setattr(
         order_services,
         "create_transaction",
-        lambda *args, **kwargs: pytest.fail("sale must not occur after reorder failure"),
+        lambda *args, **kwargs: pytest.fail(
+            "sale must not occur after reorder failure"
+        ),
     )
 
     execute_sale(workflow_state)
@@ -379,9 +454,7 @@ def test_execute_sale_stops_when_supplier_reorder_fails(workflow_state, monkeypa
 
 
 def test_execute_sale_stops_when_stock_is_insufficient(workflow_state, monkeypatch):
-    item = _make_requested_item(
-        requested_quantity=10, matched_catalog_item="A4 paper"
-    )
+    item = _make_requested_item(requested_quantity=10, matched_catalog_item="A4 paper")
     workflow_state.requested_items = [item]
     monkeypatch.setattr(
         order_services,
@@ -426,9 +499,143 @@ def test_execute_sale_resets_state_and_reraises_transaction_error(
     assert item.order_line_id not in workflow_state.sold_order_line_ids
 
 
-def test_execute_restock_reorders_only_items_below_minimum(
+def test_execute_sale_handles_two_lines_with_same_catalog_item(
     workflow_state, monkeypatch
 ):
+    item_1 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=70,
+        can_fulfill=True,
+        shortage_quantity=0,
+    )
+
+    item_2 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=70,
+        can_fulfill=False,
+        shortage_quantity=40,
+        supplier_order_feasible=True,
+        supplier_delivery_date=date(2026, 1, 2),
+    )
+
+    workflow_state.requested_items = [item_1, item_2]
+
+    # What the DB would report as execute_sale progresses:
+    # 1. 100 before first sale
+    # 2. 30 after first sale, when validating second line's shortage
+    # 3. 70 after the supplier provides the missing 40
+    stock_levels = iter([100, 30, 70])
+
+    monkeypatch.setattr(
+        order_services,
+        "get_stock_level",
+        lambda *args: pd.DataFrame({"current_stock": [next(stock_levels)]}),
+    )
+
+    reorder_calls = []
+
+    def reorder_supply(**kwargs):
+        reorder_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        order_services,
+        "reorder_supply",
+        reorder_supply,
+    )
+
+    transaction_calls = []
+
+    def create_transaction(db_engine, inventory_name, **kwargs):
+        transaction_calls.append((inventory_name, kwargs))
+        return "transaction-id"
+
+    monkeypatch.setattr(
+        order_services,
+        "create_transaction",
+        create_transaction,
+    )
+
+    execute_sale(workflow_state)
+
+    assert item_1.sale_completed is True
+    assert item_2.sale_completed is True
+
+    assert reorder_calls == [
+        {
+            "inventory_name": "A4 paper",
+            "quantity": 40,
+            "arrival_date": item_2.supplier_delivery_date,
+            "workflow_state": workflow_state,
+        }
+    ]
+
+    assert len(transaction_calls) == 2
+
+
+def test_supplier_stock_is_unavailable_before_arrival(workflow_state, monkeypatch):
+    from sqlalchemy import create_engine
+
+    from supply_chain_agents import utils
+
+    engine = create_engine("sqlite:///:memory:")
+    monkeypatch.setattr(workflow_state, "db_engine", engine)
+    monkeypatch.setattr(utils, "get_cash_balance", lambda *args: 1000.0)
+
+    # Start with five units on hand.
+    pd.DataFrame(
+        [
+            {
+                "inventory_name": "A4 paper",
+                "transaction_type": "stock_orders",
+                "units": 5,
+                "price": 0.25,
+                "transaction_date": "2026-01-01",
+            }
+        ]
+    ).to_sql("transactions", engine, index=False)
+
+    try:
+        assert utils.reorder_supply(
+            inventory_name="A4 paper",
+            quantity=20,
+            arrival_date=date(2026, 1, 5),
+            workflow_state=workflow_state,
+        )
+
+        def stock_on(day):
+            return utils.get_stock_level(engine, "A4 paper", day)["current_stock"].iloc[
+                0
+            ]
+
+        assert stock_on(date(2026, 1, 4)) == 5
+        assert stock_on(date(2026, 1, 5)) == 25
+
+        item = _make_requested_item(
+            matched_catalog_item="A4 paper",
+            requested_quantity=10,
+            order_date=date(2026, 1, 4),
+            delivery_date=date(2026, 1, 15),
+        )
+        workflow_state.requested_items = [item]
+
+        # The sale must fail before arrival
+        execute_sale(workflow_state)
+        assert item.sale_completed is False
+        assert stock_on(date(2026, 1, 4)) == 5
+        assert stock_on(date(2026, 1, 5)) == 25
+
+        # The sale can succeed on arrival date
+        item.order_date = date(2026, 1, 5)
+        execute_sale(workflow_state)
+        assert item.sale_completed is True
+        assert stock_on(date(2026, 1, 4)) == 5
+        assert stock_on(date(2026, 1, 5)) == 15
+    finally:
+        engine.dispose()
+
+
+def test_execute_restock_reorders_only_items_below_minimum(workflow_state, monkeypatch):
     workflow_state.min_stock_levels = {
         "A4 paper": 5,
         "Construction paper": 5,
@@ -459,13 +666,13 @@ def test_execute_restock_reorders_only_items_below_minimum(
         {
             "inventory_name": "A4 paper",
             "quantity": 2,
-            "order_date": date(2026, 1, 1),
+            "arrival_date": date(2026, 1, 1),
             "workflow_state": workflow_state,
         },
         {
             "inventory_name": "Construction paper",
             "quantity": 4,
-            "order_date": date(2026, 1, 1),
+            "arrival_date": date(2026, 1, 1),
             "workflow_state": workflow_state,
         },
     ]

@@ -51,7 +51,14 @@ def run_test_scenarios():
         )
         quote_requests_sample.dropna(subset=["request_date"], inplace=True)
         quote_requests_sample = quote_requests_sample.sort_values("request_date")
-    except Exception as e:
+    except (
+        FileNotFoundError,
+        OSError,
+        pd.errors.ParserError,
+        UnicodeDecodeError,
+        KeyError,
+        ValueError,
+    ) as e:
         logger.error("Error loading test data: %s", e)
         return
 

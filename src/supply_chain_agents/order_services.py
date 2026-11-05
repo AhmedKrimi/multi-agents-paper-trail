@@ -17,7 +17,6 @@ from supply_chain_agents.utils import (
     get_supplier_delivery_date,
     reorder_supply,
     return_full_state,
-    search_quote_history,
     validate_model,
 )
 from supply_chain_agents.workflow_state import WorkflowState
@@ -112,6 +111,8 @@ def check_stock_inventory(workflow_state: WorkflowState) -> str:
         str: List of requested items with their status in the inventory (can_fulfill, shortage_quantity) updated
     """
 
+    remaining_stock_per_item: dict[str, int] = {}
+
     for item in workflow_state.requested_items:
         matched_catalog_item = item.matched_catalog_item
         order_date = item.order_date
@@ -119,16 +120,20 @@ def check_stock_inventory(workflow_state: WorkflowState) -> str:
         if matched_catalog_item not in workflow_state.catalog_items:
             item.can_fulfill = False
             continue
-        current_stock = int(
-            get_stock_level(workflow_state.db_engine, matched_catalog_item, order_date)[
-                "current_stock"
-            ].iloc[0]
-        )
-        if current_stock >= quantity:
+        if matched_catalog_item not in remaining_stock_per_item:
+            remaining_stock_per_item[matched_catalog_item] = int(
+                get_stock_level(
+                    workflow_state.db_engine, matched_catalog_item, order_date
+                )["current_stock"].iloc[0]
+            )
+        available_stock = remaining_stock_per_item[matched_catalog_item]
+        if available_stock >= quantity:
             item.can_fulfill = True
+            item.shortage_quantity = 0
+            remaining_stock_per_item[matched_catalog_item] -= quantity
         else:
             item.can_fulfill = False
-            item.shortage_quantity = quantity - current_stock
+            item.shortage_quantity = quantity - available_stock
 
     return return_full_state(items=workflow_state.requested_items)
 
@@ -183,32 +188,18 @@ def calculate_discount_rate(
     """
     logger = logger if logger is not None else get_logger(__name__)
     discount_rate = 0.0
-    quote_history = search_quote_history(
-        workflow_state.db_engine,
-        [item.item_description for item in workflow_state.requested_items],
-        limit=1,
+    total_price = sum(
+        item.requested_quantity
+        * workflow_state.product_prices[item.matched_catalog_item]
+        for item in workflow_state.requested_items
+        if item.can_fulfill or item.supplier_order_feasible
     )
-
-    if quote_history:
-        order_size = quote_history[0]["order_size"]
-        if order_size == "large":
-            discount_rate = 0.2
-        elif order_size == "medium":
-            discount_rate = 0.1
-        else:
-            discount_rate = 0.0
+    if total_price >= 100:  # Large
+        discount_rate = 0.2
+    elif total_price >= 30:  # Medium
+        discount_rate = 0.1
     else:
-        logger.debug("No history found for this request, calculating the order_size")
-
-        total_quantity = sum(
-            item.requested_quantity for item in workflow_state.requested_items
-        )
-        if total_quantity >= 1000:  # Large
-            discount_rate = 0.2
-        elif total_quantity >= 100:  # Medium
-            discount_rate = 0.1
-        else:
-            discount_rate = 0.0  # Small
+        discount_rate = 0.0  # Small
     # Apply the calculated bulk discount to all the items
     apply_bulk_discount(workflow_state.requested_items, discount=discount_rate)
 
@@ -224,6 +215,7 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) ->
         str: List of all items with their sale_completed attribute updated
     """
     logger = logger if logger is not None else get_logger(__name__)
+    remaining_stock_per_item: dict[str, int] = {}
     for item in workflow_state.requested_items:
         if item.matched_catalog_item is None:
             continue
@@ -233,6 +225,7 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) ->
         order_date = item.order_date
         supplier_order_feasible = item.supplier_order_feasible
         shortage_quantity = item.shortage_quantity
+        supplier_delivery_date = item.supplier_delivery_date
         discount_rate = item.discount_rate
 
         if item_id in workflow_state.sold_order_line_ids:
@@ -246,14 +239,21 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) ->
             logger.error("Transaction for %s has failed", matched_catalog_item)
             continue
 
-        transaction_date = order_date
-
-        # Order the missing quantity from the supplier first
-        if supplier_order_feasible:
-            actual_shortage_quantity = quantity - int(
+        if matched_catalog_item not in remaining_stock_per_item:
+            remaining_stock_per_item[matched_catalog_item] = int(
                 get_stock_level(
                     workflow_state.db_engine, matched_catalog_item, order_date
                 )["current_stock"].iloc[0]
+            )
+
+        transaction_date = (
+            supplier_delivery_date if supplier_order_feasible is True else order_date
+        )
+
+        # Order the missing quantity from the supplier first
+        if supplier_order_feasible:
+            actual_shortage_quantity = max(
+                0, quantity - remaining_stock_per_item[matched_catalog_item]
             )
             if actual_shortage_quantity != shortage_quantity:
                 logger.error(
@@ -266,7 +266,7 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) ->
             supplier_order_succeeded = reorder_supply(
                 inventory_name=matched_catalog_item,
                 quantity=shortage_quantity,
-                order_date=transaction_date,
+                arrival_date=supplier_delivery_date,
                 workflow_state=workflow_state,
             )
             if not supplier_order_succeeded:
@@ -278,19 +278,17 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) ->
                 item.sale_completed = False
                 item.can_fulfill = False
                 continue
+            else:
+                remaining_stock_per_item[matched_catalog_item] += shortage_quantity
 
         # Check first if the quantity is available before the delivery date
-        current_stock = int(
-            get_stock_level(
-                workflow_state.db_engine, matched_catalog_item, transaction_date
-            )["current_stock"].iloc[0]
-        )
-        if current_stock < quantity:
+        available_stock = remaining_stock_per_item[matched_catalog_item]
+        if available_stock < quantity:
             logger.warning(
                 "Selling %s failed! quantity in stock: %s"
                 " is not enough to cover requested quantity: %s",
                 matched_catalog_item,
-                current_stock,
+                available_stock,
                 quantity,
             )
             item.sale_completed = False
@@ -316,6 +314,7 @@ def execute_sale(workflow_state: WorkflowState, logger: Logger | None = None) ->
                 )
                 workflow_state.sold_order_line_ids.add(item_id)
                 item.sale_completed = True
+                remaining_stock_per_item[matched_catalog_item] -= quantity
                 logger.info(
                     "Selling %s transaction was successful - price: %s - transaction ID: %s",
                     matched_catalog_item,
@@ -365,10 +364,13 @@ def execute_restock(
                 stock,
                 restock_quantity,
             )
+            supplier_delivery_date = get_supplier_delivery_date(
+                order_date, restock_quantity
+            )
             restock_succeeded = reorder_supply(
                 inventory_name=item,
                 quantity=restock_quantity,
-                order_date=_parse_date(order_date),
+                arrival_date=_parse_date(supplier_delivery_date),
                 workflow_state=workflow_state,
             )
             if restock_succeeded:
