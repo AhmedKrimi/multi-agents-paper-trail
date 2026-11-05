@@ -4,30 +4,25 @@
   <img src="images/beavers_choice.jpeg" alt="Beaver's Choice Paper Company" width="300"/>
 </p>
 
-An end-to-end multi-agent system that automates the complete order lifecycle of a paper supply company — from a free-text customer email to a booked sale in the ledger. Built with [`smolagents`](https://github.com/huggingface/smolagents), Pydantic, and SQLite.
+A multi-agent system that turns customer requests into inventory checks, quotes, and recorded sales. Built with [`smolagents`](https://github.com/huggingface/smolagents), Pydantic, and SQLite.
 
 ## The Challenge
 
-The Beaver's Choice Paper Company was losing sales to slow, error-prone manual operations. Every incoming customer request required someone to:
+Processing a customer request involves several steps:
 
-- Process the request: customers write in free text ("we need glossy sheets for a gala next Friday"), often naming products loosely and mixing several items in one message
-- Check inventory in real time: stock levels change with every sale, and a quote based on stale numbers means a broken promise
-- Decide on restocking: when stock is short, is it worth ordering from the supplier? Can it arrive before the customer's deadline? Is there enough cash?
-- Price competitively: discounts should reflect order size and past quoting history
-- Close the sale reliably: record the transaction without double-charging, overselling, or corrupting the ledger
-
-Doing this by hand doesn't scale; automating it naively with a single LLM prompt is unreliable — one hallucinated stock number or invented delivery date corrupts real financial data.
+- Read free-text requests, identify products, and extract quantities and dates
+- Check stock, accounting for earlier sales
+- Check whether supplier orders can cover shortages within the delivery deadline and available budget
+- Calculate discounts from the value of fulfillable items
+- Record each sale once in the ledger
 
 ## The Solution
 
-This project solves the problem with four specialized agents plus the orchestrator, each owning one stage of the order lifecycle and sharing typed workflow state through a common `WorkflowState`:
+Four specialized agents handle extraction, inventory, quoting, and sales. An orchestrator coordinates them through a shared `WorkflowState`:
 
-- A shared Pydantic model (`RequestedItem`) is stored in `WorkflowState` and enriched in place by each stage, avoiding prompt-chained JSON/schema passing between agents.
-- Catalog matching is deterministic: customer item descriptions are embedded with BGE-M3 and compared against cached catalog embeddings.
-- Financial and inventory operations are implemented in standalone Python functions in `order_services.py` and database helpers in `utils.py`, called through thin agent tool wrappers: stock math, discount rules, supplier reorders, restocking, and ledger writes are handled in code.
-- Defensive guards at every stage: execution-order checks, duplicate-sale protection, shortfall re-verification at sale time, and cash-balance checks before supplier purchases limit inconsistent state.
-
-The result: a customer request goes in as plain text and comes out as a priced, verified, executed (or transparently declined) order, with the database as the single source of truth at every point in time.
+- Each stage updates the same Pydantic `RequestedItem` objects in `WorkflowState`.
+- BGE-M3 embeddings match customer descriptions against cached catalog embeddings.
+- Agent tools call `order_services.py` for business logic and `utils.py` for database operations.
 
 ---
 
@@ -37,72 +32,71 @@ This project builds on Udacity’s Agentic AI capstone starter:
 
 [Udacity starter project](https://github.com/udacity/agentic-ai-c4-exercises-demos/tree/main/project)
 
-The starter provides the base dataset, catalog, database setup, and utility scaffolding. The multi-agent workflow in this repository was implemented and then substantially refactored to use shared typed state, deterministic embedding-based catalog matching, consolidated sales/post-sale handling, and structured final-state retrieval.
+The starter supplies the datasets, catalog, database setup, and utility functions. The workflow here uses shared typed state, embedding-based matching, and one Sales Manager for sales, restocking, and reporting.
 
 ## Architecture
 
 
 
-The system uses 4 specialized agents, all implemented as `ToolCallingAgent` instances and coordinated by a top-level orchestrator:
+The agents and orchestrator are `ToolCallingAgent` instances:
 ![Multi-agent workflow](images/multi_agents_workflow.png)
-*Figure 1. End-to-end multi-agent order-processing workflow, showing orchestration, shared state, database interactions, and the customer response path.*
+*Figure 1. Order processing, shared state, and database access.*
 
 
 
 | Agent | Responsibility | Tools |
 |---|---|---|
-| **Orchestrator** | Coordinates the workflow and composes the final customer-facing answer from structured order state | `get_order_details`, `manage_inventory`, `prepare_quote`, `prepare_sale_restock_financial_report`, `get_order_state` |
-| **Order Processor** | Extracts requested items from free text and appends typed `RequestedItem` objects to shared workflow state | `extract_item_description` |
-| **Inventory Manager** | Matches customer wording to the catalog using embeddings, checks stock, and verifies supplier timing for shortages | `assign_inventory_name`, `check_stock_inventory`, `check_delivery_timeline` |
-| **Quote Manager** | Applies a discount based on historical quote data or requested quantity | `calculate_discount_rate` |
-| **Sales Manager** | Reorders shortfalls when feasible, executes sales, restocks low inventory, and generates the financial report | `execute_sale`, `execute_restock`, `get_financial_status` |
+| **Orchestrator** | Runs the workflow stages and writes the customer response from order state | `get_order_details`, `manage_inventory`, `prepare_quote`, `prepare_sale_restock_financial_report`, `get_order_state` |
+| **Order Processor** | Extracts order lines as `RequestedItem` objects in shared state | `extract_item_description` |
+| **Inventory Manager** | Matches catalog items, checks stock, and checks supplier delivery dates | `assign_inventory_name_tool`, `check_stock_inventory_tool`, `check_delivery_timeline_tool` |
+| **Quote Manager** | Applies a discount based on the value of fulfillable items | `calculate_discount_rate_tool` |
+| **Sales Manager** | Reorders shortfalls when feasible, executes sales, restocks low inventory, and generates the financial report | `execute_sale_tool`, `execute_restock_tool`, `get_financial_status_tool` |
 
-### Agent tools and helper functions
+### Agent tools, services and helper functions
 
 ![Agent tools and helper functions](images/tools_helper_functions.png)
-*Figure 2. Agent-owned tools and the deterministic helper functions they use for inventory, quoting, sales, restocking, and financial reporting.*
+*Figure 2. Agent-owned tool wrappers, order services, and the helper functions they call.*
 
 
 Agents hold the application state in `self.workflow_state`, separate from the internal `state` dictionary used by smolagents. Order service functions receive the same `WorkflowState` instance as their `workflow_state` argument.
 
 ### Data flow
 
-Requested items are stored once in `WorkflowState.requested_items` as typed Pydantic `RequestedItem` objects and mutated in place throughout the workflow:
+Each stage updates fields on the `RequestedItem` objects in `WorkflowState.requested_items`:
 
 1. `order_line_id`, `item_description`, `requested_quantity`, `order_date`, `delivery_date` (Order Processor)
 2. `matched_catalog_item`, `can_fulfill`, `shortage_quantity`, `supplier_order_feasible`, `supplier_delivery_date` (Inventory Manager)
 3. `discount_rate` (Quote Manager)
 4. `sale_completed` (Sales Manager)
 
-The Sales Manager also owns post-sale restocking and financial reporting. The orchestrator then calls `get_order_state` to retrieve the authoritative structured state before composing the customer response.
-
-This replaces the earlier design that serialized `RequestedItem` objects and repeatedly passed model JSON/schema text through agent prompts.
+The Sales Manager also handles restocking and financial reporting. The orchestrator calls `get_order_state` to read the final order state before writing the customer response.
 
 ## Business logic
 
 ### Inventory & reordering
 - Stock levels are computed from the `transactions` table (stock orders minus sales) as of the request date via `get_stock_level`.
+- Stock checks track remaining inventory across order lines for the same catalog item.
 - If stock is insufficient, `check_delivery_timeline` uses `get_supplier_delivery_date` (lead time scales with quantity: same-day up to 10 units, up to 7 days for >1000 units) to decide whether a supplier reorder can arrive before the customer's delivery date.
-- `reorder_supply` purchases the shortfall at 75% of the retail unit price (`SUPPLIER_PRICE_FACTOR = 0.75`), but only if the current cash balance covers the cost. Purchases are logged as `stock_orders` transactions.
+- `reorder_supply` purchases the shortfall at 75% of the retail unit price (`SUPPLIER_PRICE_FACTOR = 0.75`), if cash as of the supplier arrival date covers the cost. Purchases are logged as `stock_orders` on that date.
 
 ### Quoting & discounts
-`calculate_discount_rate` first searches historical quotes (`search_quote_history`) for a matching request:
+`calculate_discount_rate` uses the total pre-discount value of lines fulfillable from stock or a feasible supplier reorder:
 
-- History found → discount by past `order_size`: large = 20%, medium = 10%, otherwise 0%.
-- No history → discount by requested quantity: ≥1000 units = 20%, ≥100 units = 10%, else 0%.
+- $100 or more → 20%; $30 to under $100 → 10%; otherwise 0%.
+- The same rate applies to all order lines.
 
 ### Sales execution
-`execute_sale` guards against several failure modes:
-- Duplicate execution: `WorkflowState.sold_order_line_ids` prevents double-selling the same order line within one order.
-- Stale shortfall data: the actual shortfall is recomputed at sale time and compared against the Inventory Manager's figure; on mismatch the sale is aborted.
-- Final stock check: stock is re-verified after any supplier reorder before the sale transaction is written.
-- Successful sales are recorded at `(1 − discount_rate) × unit_price × quantity` as `sales` transactions.
+`execute_sale` checks and records each order line:
+- Duplicate execution: `WorkflowState.sold_order_line_ids` tracks lines already sold in the current order.
+- Stale shortfalls: before a supplier reorder, the shortfall is compared with the Inventory Manager's calculation; a mismatch stops the sale.
+- Available stock: the sale is rejected if remaining stock cannot cover the line after any supplier reorder.
+- Successful sales are recorded at `(1 − discount_rate) × unit_price × quantity` as `sales` transactions, dated on supplier arrival for supplier-dependent lines or on the request date otherwise.
 
-The orchestrator's final answer reports one of three verdicts: fulfilled, partially fulfilled (listing which items shipped and which didn't, with delivery dates), or cannot be fulfilled. Its prompt explicitly forbids fabricating transactions, dates, or orders.
+The orchestrator reports which items were sold or rejected, includes requested delivery dates for sold items, and mentions any discount.
 
 ### Post-sale restocking & reporting
-The Sales Manager performs post-sale operations immediately after sale execution:
-- `execute_restock` scans inventory as of the request date and reorders items below their configured minimum stock level.
+After attempting the sales, the Sales Manager runs restocking and reporting:
+- `execute_restock` scans inventory as of the request date and reorders items below their configured minimum stock level, recording replenishment on the supplier arrival date.
 - `get_financial_status` calls `generate_financial_report` and stores a validated `FinancialReport` in shared workflow state.
 
 ---
@@ -170,7 +164,7 @@ Create a `.env` file in the parent directory of the source folder:
 OPENAI_API_KEY=sk-...
 ```
 
-The model is instantiated with `temperature=0.0` and `parallel_tool_calls=False` to reduce output variability and disable parallel tool calls. Live model responses can still vary between runs.
+The model uses `temperature=0.0` and `parallel_tool_calls=False`. This reduces output variability and disables parallel tool calls, though responses can still vary between runs.
 
 ### Run
 
@@ -188,9 +182,9 @@ This will:
 
 ## Tests & coverage
 
-The first test suite contains 14 end-to-end tests in `tests/test_e2e.py`, using sample customer requests from `data/quote_requests_sample.csv`. These tests exercise the full agent workflow and assert structured order-line state, including catalog matches, quantities, fulfillment decisions, supplier feasibility, sale completion, and financial-report presence where applicable.
+`tests/test_e2e.py` contains 14 end-to-end tests using requests from `data/quote_requests_sample.csv`. They check catalog matches, quantities, fulfillment decisions, supplier feasibility, completed sales, and financial reports.
 
-`tests/test_order_services.py` contains focused tests for order-service validation, catalog matching, stock and delivery checks, sales, restocking, and financial reporting. Run them with `python -m pytest tests/test_order_services.py`.
+`tests/test_order_services.py` contains 26 tests for validation, catalog matching, shared stock allocation, supplier arrival dates, discount thresholds, sales, restocking, and financial reports.
 
 ### Scenarios covered
 
@@ -204,55 +198,57 @@ The first test suite contains 14 end-to-end tests in `tests/test_e2e.py`, using 
 
 ### Test database and execution
 
-Tests use `tests/test_munder_difflin.db`, separate from the application's `data/munder_difflin.db`. An autouse fixture calls `init_database()` before each test to restore the test database's seeded baseline. The orchestrator is shared for the session and resets its transient workflow state when processing each new order. Run this suite sequentially because it uses one shared test database.
+The end-to-end suite uses `tests/test_munder_difflin.db`, separate from the application's `data/munder_difflin.db`. An autouse fixture calls `init_database()` before each test to restore the seeded data. The tests share one orchestrator, which resets workflow state for each order. Run the suites sequentially because the tests share a database.
 
-These are live integration tests: they require `OPENAI_API_KEY`, make paid model API calls, and use the BGE-M3 embedding model, which may need downloading on the first run. The `e2e` marker selects the suite; registering the marker alone does not exclude it from a plain `pytest` run.
+The e2e tests are live integration tests: they require `OPENAI_API_KEY` and make paid model API calls. Both suites use the BGE-M3 embedding model, which may need downloading on the first run. The `e2e` marker selects the suite; registering the marker alone does not exclude it from a plain `pytest` run.
 
-From the repository root, run:
+From the repository root, run the regular tests, e2e tests, or the complete suite:
 
 ```bash
-python -m pytest -m e2e tests/test_e2e.py
+python -m pytest -m "not e2e"
+python -m pytest -m e2e
+python -m pytest
 ```
 
 ### Coverage
 
-Generate both a terminal report showing missing lines and an HTML report:
+The full-suite command below generates a terminal report showing missing lines and an HTML report:
 
 ```bash
-python -m pytest -m e2e tests/test_e2e.py --cov=supply_chain_agents --cov-config=pyproject.toml --cov-report=term-missing --cov-report=html
+python -m pytest --cov=supply_chain_agents --cov-config=pyproject.toml --cov-report=term-missing --cov-report=html
 ```
 
 Open `htmlcov/index.html` and select a module to inspect its missed executable lines. The report omits `supply_chain_agents/main.py`; `configure_logging()` is excluded using `# pragma: no cover`.
 
-The coverage report generated reports 90% overall statement coverage (425 of 473 statements executed, with 48 missed). Percentages below are rounded as displayed in the HTML report.
+The latest full-suite run measured 95% statement coverage (472 of 499 statements executed, 27 missed). It ran 40 tests: 39 passed and one e2e test failed because `"high-quality glossy paper"` was matched to `"A4 glossy paper"` rather than rejected. Percentages below follow the coverage report's rounding.
 
 | Module | Statements | Missed | Coverage |
 |---|---:|---:|---:|
-| `agents.py` | 248 | 26 | 90% |
-| `config.py` | 17 | 0 | 100% |
+| `agents.py` | 114 | 3 | 97% |
+| `config.py` | 15 | 0 | 100% |
 | `config_logging.py` | 5 | 0 | 100% |
-| `workflow_state.py` | 14 | 0 | 100% |
+| `embeddings.py` | 9 | 0 | 100% |
 | `inventory.py` | 1 | 0 | 100% |
 | `models.py` | 21 | 0 | 100% |
-| `utils.py` | 167 | 22 | 87% |
-| **Total** | **473** | **48** | **90%** |
+| `order_services.py` | 167 | 2 | 99% |
+| `utils.py` | 153 | 22 | 86% |
+| `workflow_state.py` | 14 | 0 | 100% |
+| **Total** | **499** | **27** | **95%** |
 
-The logging module's percentage applies to its remaining measured statements after the exclusion. The empty `__init__.py` contains no executable statements and is omitted from this summary.
+The empty `__init__.py` contains no executable statements and is omitted from this summary.
 
-Coverage measures executed statements; it does not establish correctness or guarantee repeatable live model responses. The suite currently focuses on workflow-state assertions rather than exhaustive ledger or financial calculations.
+The end-to-end tests mainly check workflow state, with limited assertions on ledger and financial calculations; `tests/test_order_services.py` covers those service-level behaviors directly.
 
 ---
 
 ## Design decisions
 
-- Shared typed state over prompt chaining: `RequestedItem` objects live in `WorkflowState`, so agents enrich the same authoritative state instead of passing serialized model JSON/schema text between prompts.
-- Deterministic matching and tools: catalog embeddings are cached once, semantic matching is done in Python, and all money/inventory-affecting logic remains deterministic.
-- Simpler orchestration: sales and post-sale responsibilities are handled by the same agent, reducing unnecessary agent boundaries.
-- Guard rails at every stage: stage-ordering checks, duplicate-sale protection, shortfall re-verification, and cash-balance checks before supplier orders limit inconsistent state.
-- Point-in-time correctness: Stock and cash are always evaluated as of the request date, so replaying historical requests in order produces a consistent ledger.
+- Shared state: stages update the same `RequestedItem` objects instead of passing JSON/schema text between prompts.
+- Matching and transactions: Python functions handle catalog matching, pricing, stock calculations, and ledger writes. Catalog embeddings are cached.
+- Sales ownership: one agent handles sales, restocking, and reporting, reducing handoffs.
+- Validation: checks cover stage order, duplicate sales, changed shortfalls, and cash available for supplier purchases.
+- Point-in-time accounting: Stock checks and financial reports use the request date; supplier purchases and dependent sales use the supplier arrival date.
 
 ## Possible improvements (WIP)
 
-- Improve catalog matching with a two-stage retrieval pipeline: use embedding similarity to retrieve the top-k catalog candidates, then apply a reranker before selecting the final match. This should better preserve attributes such as paper size, finish, weight, and material.
-- Handle multiple order lines that map to the same catalog item more robustly, since earlier sales can make previously calculated shortage quantities stale.
-- Improve quote-history matching by considering or reranking several similar historical quotes instead of relying only on the top-1 result.
+- Use stricter catalog matching to avoid false-positive matches; when a request is rejected or cannot be matched confidently, suggest the closest catalog products available to the customer.
