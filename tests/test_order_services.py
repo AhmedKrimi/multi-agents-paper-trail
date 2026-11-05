@@ -190,6 +190,34 @@ def test_check_stock_inventory(workflow_state):
     assert item_2.shortage_quantity == 283
 
 
+def test_check_stock_inventory_allocates_shared_stock_across_order_lines(
+    workflow_state, monkeypatch
+):
+    item_1 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=70,
+    )
+    item_2 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=70,
+    )
+    workflow_state.requested_items = [item_1, item_2]
+
+    monkeypatch.setattr(
+        order_services,
+        "get_stock_level",
+        lambda *args: pd.DataFrame({"current_stock": [100]}),
+    )
+
+    check_stock_inventory(workflow_state)
+
+    assert item_1.can_fulfill is True
+    assert item_1.shortage_quantity == 0
+
+    assert item_2.can_fulfill is False
+    assert item_2.shortage_quantity == 40
+
+
 def test_check_delivery_timeline(workflow_state):
     init_database(workflow_state.db_engine)
     item = _make_requested_item(
@@ -469,6 +497,80 @@ def test_execute_sale_resets_state_and_reraises_transaction_error(
     assert item.sale_completed is False
     assert item.can_fulfill is False
     assert item.order_line_id not in workflow_state.sold_order_line_ids
+
+
+def test_execute_sale_handles_two_lines_with_same_catalog_item(
+    workflow_state, monkeypatch
+):
+    item_1 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=70,
+        can_fulfill=True,
+        shortage_quantity=0,
+    )
+
+    item_2 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=70,
+        can_fulfill=False,
+        shortage_quantity=40,
+        supplier_order_feasible=True,
+        supplier_delivery_date=date(2026, 1, 2),
+    )
+
+    workflow_state.requested_items = [item_1, item_2]
+
+    # What the DB would report as execute_sale progresses:
+    # 1. 100 before first sale
+    # 2. 30 after first sale, when validating second line's shortage
+    # 3. 70 after the supplier provides the missing 40
+    stock_levels = iter([100, 30, 70])
+
+    monkeypatch.setattr(
+        order_services,
+        "get_stock_level",
+        lambda *args: pd.DataFrame({"current_stock": [next(stock_levels)]}),
+    )
+
+    reorder_calls = []
+
+    def reorder_supply(**kwargs):
+        reorder_calls.append(kwargs)
+        return True
+
+    monkeypatch.setattr(
+        order_services,
+        "reorder_supply",
+        reorder_supply,
+    )
+
+    transaction_calls = []
+
+    def create_transaction(db_engine, inventory_name, **kwargs):
+        transaction_calls.append((inventory_name, kwargs))
+        return "transaction-id"
+
+    monkeypatch.setattr(
+        order_services,
+        "create_transaction",
+        create_transaction,
+    )
+
+    execute_sale(workflow_state)
+
+    assert item_1.sale_completed is True
+    assert item_2.sale_completed is True
+
+    assert reorder_calls == [
+        {
+            "inventory_name": "A4 paper",
+            "quantity": 40,
+            "arrival_date": item_2.supplier_delivery_date,
+            "workflow_state": workflow_state,
+        }
+    ]
+
+    assert len(transaction_calls) == 2
 
 
 def test_supplier_stock_is_unavailable_before_arrival(workflow_state, monkeypatch):
