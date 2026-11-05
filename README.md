@@ -184,13 +184,13 @@ This will:
 
 `tests/test_e2e.py` contains 14 end-to-end tests using requests from `data/quote_requests_sample.csv`. They check catalog matches, quantities, fulfillment decisions, supplier feasibility, completed sales, and financial reports.
 
-`tests/test_order_services.py` contains 26 tests for validation, catalog matching, shared stock allocation, supplier arrival dates, discount thresholds, sales, restocking, and financial reports.
+`tests/test_order_services.py` contains 27 tests for validation, catalog matching, shared stock allocation (including shortages across repeated catalog items), supplier arrival dates, discounts, sales, restocking, and financial reports.
 
 ### Scenarios covered
 
 | Area | Scenarios |
 |---|---|
-| Inventory fulfillment | Fulfillment from available stock; replenishment of a shortage before completing a sale |
+| Inventory fulfillment | Fulfillment from available stock; replenishment of a shortage before completing a sale; allocating stock after an earlier line has a shortage |
 | Mixed orders | Rejection of an unmatched item alongside supplier fulfillment of another item |
 | Catalog matching | Underspecified requests; non-exact descriptions; product variants; dimensions; size and finish; distinct variants within one order |
 | Rejection paths | Supplier delivery infeasibility; unmatched lines without aborting the workflow; shortages with infeasible replenishment; insufficient cash despite feasible supplier timing |
@@ -220,7 +220,9 @@ python -m pytest --cov=supply_chain_agents --cov-config=pyproject.toml --cov-rep
 
 Open `htmlcov/index.html` and select a module to inspect its missed executable lines. The report omits `supply_chain_agents/main.py`; `configure_logging()` is excluded using `# pragma: no cover`.
 
-The latest full-suite run measured 95% statement coverage (472 of 499 statements executed, 27 missed). It ran 40 tests: 39 passed and one e2e test failed because `"high-quality glossy paper"` was matched to `"A4 glossy paper"` rather than rejected. Percentages below follow the coverage report's rounding.
+**Test results:** 40 of 41 tests pass. One e2e test fails because `"high-quality glossy paper"` is matched to `"A4 glossy paper"` instead of being rejected.
+
+**Coverage:** The latest full-suite coverage report is 95% (472 of 499 statements); the module breakdown below is from that report.
 
 | Module | Statements | Missed | Coverage |
 |---|---:|---:|---:|
@@ -235,7 +237,6 @@ The latest full-suite run measured 95% statement coverage (472 of 499 statements
 | `workflow_state.py` | 14 | 0 | 100% |
 | **Total** | **499** | **27** | **95%** |
 
-The empty `__init__.py` contains no executable statements and is omitted from this summary.
 
 The end-to-end tests mainly check workflow state, with limited assertions on ledger and financial calculations; `tests/test_order_services.py` covers those service-level behaviors directly.
 

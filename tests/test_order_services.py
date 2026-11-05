@@ -218,6 +218,35 @@ def test_check_stock_inventory_allocates_shared_stock_across_order_lines(
     assert item_2.shortage_quantity == 40
 
 
+def test_check_stock_inventory_consumes_stock_when_first_line_has_shortage(
+    workflow_state, monkeypatch
+):
+    item_1 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=100,
+    )
+    item_2 = _make_requested_item(
+        matched_catalog_item="A4 paper",
+        requested_quantity=30,
+    )
+
+    workflow_state.requested_items = [item_1, item_2]
+
+    monkeypatch.setattr(
+        order_services,
+        "get_stock_level",
+        lambda *args: pd.DataFrame({"current_stock": [60]}),
+    )
+
+    check_stock_inventory(workflow_state)
+
+    assert item_1.can_fulfill is False
+    assert item_1.shortage_quantity == 40
+
+    assert item_2.can_fulfill is False
+    assert item_2.shortage_quantity == 30
+
+
 def test_check_delivery_timeline(workflow_state):
     init_database(workflow_state.db_engine)
     item = _make_requested_item(
@@ -520,10 +549,6 @@ def test_execute_sale_handles_two_lines_with_same_catalog_item(
 
     workflow_state.requested_items = [item_1, item_2]
 
-    # What the DB would report as execute_sale progresses:
-    # 1. 100 before first sale
-    # 2. 30 after first sale, when validating second line's shortage
-    # 3. 70 after the supplier provides the missing 40
     stock_levels = iter([100, 30, 70])
 
     monkeypatch.setattr(

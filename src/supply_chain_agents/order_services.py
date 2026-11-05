@@ -134,6 +134,7 @@ def check_stock_inventory(workflow_state: WorkflowState) -> str:
         else:
             item.can_fulfill = False
             item.shortage_quantity = quantity - available_stock
+            remaining_stock_per_item[matched_catalog_item] = 0
 
     return return_full_state(items=workflow_state.requested_items)
 
